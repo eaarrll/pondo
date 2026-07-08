@@ -1,0 +1,24 @@
+{
+  "name": "pondo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pondo — local-first personal finance tracker (PHP-centric)",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c green,blue \"npm run dev -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w web",
+    "start": "npm run build -w web && npm run start -w server",
+    "serve": "npm run start -w server",
+    "typecheck": "npm run typecheck -w web",
+    "seed:demo": "npm run seed:demo -w server",
+    "db:reset": "rm -f data/pondo.db data/pondo.db-wal data/pondo.db-shm && echo 'database reset — restart the server to recreate'",
+    "backup": "mkdir -p backups && cp data/pondo.db \"backups/pondo-$(date +%Y%m%d-%H%M%S).db\" && ls backups | tail -5"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.0"
+  }
+}
