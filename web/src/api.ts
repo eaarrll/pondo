@@ -106,6 +106,8 @@ export const api = {
   delTx: (id: number) => j<{ ok: boolean }>(`/api/transactions/${id}`, { method: 'DELETE' }),
   addAccount: (body: { name: string; type: string; subtitle?: string; openingCents?: number }) =>
     post<Account>('/api/accounts', body),
+  delAccount: (id: number) =>
+    j<{ ok: boolean; deletedTx: number }>(`/api/accounts/${id}`, { method: 'DELETE' }),
   budgets: () => j<BudgetRow[]>('/api/budgets'),
   setBudget: (categoryId: number, capCents: number) =>
     post<{ ok: boolean }>('/api/budgets', { categoryId, capCents }, 'PUT'),

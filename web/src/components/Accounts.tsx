@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, peso, type NetWorth } from '../api';
+import { api, peso, type Account, type NetWorth } from '../api';
 import type { ScreenProps } from '../App';
 
 const GROUPS: [string, string[]][] = [
@@ -16,7 +16,7 @@ const TYPE_ICON: Record<string, string> = {
   cash: '💵', bank: '🏦', ewallet: '📱', credit: '💳', investment: '📈',
 };
 
-export default function Accounts({ boot, rev, refresh, showToast }: ScreenProps) {
+export default function Accounts({ boot, rev, refresh, showToast, viewAccountTx }: ScreenProps) {
   const [nw, setNw] = useState<NetWorth | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState('');
@@ -39,6 +39,21 @@ export default function Accounts({ boot, rev, refresh, showToast }: ScreenProps)
       refresh();
     } catch (err) {
       showToast(`Could not add account: ${(err as Error).message}`);
+    }
+  };
+
+  const del = async (a: Account) => {
+    try {
+      const txs = await api.transactions(`?accountId=${a.id}&limit=1000`);
+      const detail = txs.length
+        ? `\n\nThis also deletes its ${txs.length} transaction${txs.length === 1 ? '' : 's'} (including transfers touching it) and recalculates history.`
+        : '';
+      if (!window.confirm(`Delete account "${a.name}"?${detail}\n\nThis cannot be undone.`)) return;
+      const res = await api.delAccount(a.id);
+      showToast(`"${a.name}" deleted${res.deletedTx ? ` — ${res.deletedTx} transactions removed` : ''}`);
+      refresh();
+    } catch (err) {
+      showToast(`Could not delete: ${(err as Error).message}`);
     }
   };
 
@@ -97,7 +112,10 @@ export default function Accounts({ boot, rev, refresh, showToast }: ScreenProps)
             <div className="acct-group" key={label}>
               <h3>{label} · <span className="num">{(sub < 0 ? '−' : '') + peso(sub)}</span></h3>
               {rows.map(a => (
-                <div className="acct-row" key={a.id}>
+                <div className="acct-row clickable" key={a.id} role="button" tabIndex={0}
+                  title="View this account's transactions"
+                  onClick={() => viewAccountTx(a)}
+                  onKeyDown={e => { if (e.key === 'Enter') viewAccountTx(a); }}>
                   <div className="tx-ico">{TYPE_ICON[a.type]}</div>
                   <div>
                     <div className="acct-name">{a.name}</div>
@@ -106,6 +124,9 @@ export default function Accounts({ boot, rev, refresh, showToast }: ScreenProps)
                   <div className={`acct-bal num ${a.balanceCents < 0 ? 'neg' : ''}`}>
                     {(a.balanceCents < 0 ? '−' : '') + peso(a.balanceCents)}
                   </div>
+                  <span className="acct-go">›</span>
+                  <button className="acct-del" title={`Delete ${a.name}`}
+                    onClick={e => { e.stopPropagation(); del(a); }}>✕</button>
                 </div>
               ))}
             </div>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, type Bootstrap } from './api';
+import { api, type Account, type Bootstrap } from './api';
 import Dashboard from './components/Dashboard';
 import Transactions from './components/Transactions';
 import Accounts from './components/Accounts';
@@ -16,6 +16,7 @@ export interface ScreenProps {
   showToast: (msg: string) => void;
   openAdd: () => void;
   onNav: (s: Screen) => void;
+  viewAccountTx: (a: Account) => void;
 }
 
 const NAV: { id: Screen; ico: string; label: string }[] = [
@@ -31,6 +32,7 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('dash');
   const [rev, setRev] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
+  const [txAccount, setTxAccount] = useState<Account | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef(0);
 
@@ -70,10 +72,13 @@ export default function App() {
     boot, rev, refresh, showToast,
     openAdd: () => setAddOpen(true),
     onNav: setScreen,
+    viewAccountTx: (a: Account) => { setTxAccount(a); setScreen('tx'); },
   };
 
+  // Sidebar nav to Transactions always shows the unfiltered ledger
   const navBtns = NAV.map(n => (
-    <button key={n.id} className={`nav-btn ${screen === n.id ? 'on' : ''}`} onClick={() => setScreen(n.id)}>
+    <button key={n.id} className={`nav-btn ${screen === n.id ? 'on' : ''}`}
+      onClick={() => { if (n.id === 'tx') setTxAccount(null); setScreen(n.id); }}>
       <span className="ico">{n.ico}</span> {n.label}
     </button>
   ));
@@ -103,7 +108,7 @@ export default function App() {
         )}
 
         {screen === 'dash' && <Dashboard {...common} />}
-        {screen === 'tx' && <Transactions {...common} />}
+        {screen === 'tx' && <Transactions {...common} account={txAccount} onClearAccount={() => setTxAccount(null)} />}
         {screen === 'accts' && <Accounts {...common} />}
         {screen === 'bud' && <Budgets {...common} />}
         {screen === 'bills' && <Bills {...common} />}

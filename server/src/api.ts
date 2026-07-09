@@ -160,6 +160,26 @@ export function registerApi(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  // Deleting an account cascades: its transactions (both sides of transfers) go
+  // with it, linked bill payments are unlinked, and bills fall back to "no account".
+  app.delete('/api/accounts/:id', (req, reply) => {
+    const id = +(req.params as { id: string }).id;
+    const acct = sqlite.prepare('SELECT id FROM accounts WHERE id = ?').get(id);
+    if (!acct) return reply.code(404).send({ error: 'account not found' });
+    const run = sqlite.transaction(() => {
+      const txIds = sqlite.prepare(
+        'SELECT id FROM transactions WHERE account_id = ? OR to_account_id = ?',
+      ).all(id, id) as { id: number }[];
+      const unlinkPay = sqlite.prepare('DELETE FROM bill_payments WHERE transaction_id = ?');
+      for (const t of txIds) unlinkPay.run(t.id);
+      sqlite.prepare('DELETE FROM transactions WHERE account_id = ? OR to_account_id = ?').run(id, id);
+      sqlite.prepare('UPDATE bills SET account_id = NULL WHERE account_id = ?').run(id);
+      sqlite.prepare('DELETE FROM accounts WHERE id = ?').run(id);
+      return txIds.length;
+    });
+    return { ok: true, deletedTx: run() };
+  });
+
   // ---------- budgets ----------
   app.get('/api/budgets', (req) => {
     const ym = (req.query as { month?: string }).month ?? today().slice(0, 7);

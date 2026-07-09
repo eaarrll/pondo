@@ -315,3 +315,11 @@ h1 { font-size: 21px; margin: 0; letter-spacing: -0.015em; }
 
 .theme-btn { font-size: 12px; color: var(--ink-3); padding: 4px 8px; border-radius: 6px; }
 .theme-btn:hover { background: var(--surface-2); color: var(--ink); }
+
+/* account row → transactions drill-in + delete */
+.acct-row.clickable { cursor: pointer; }
+.acct-go { color: var(--ink-3); font-size: 16px; line-height: 1; }
+.acct-del { opacity: 0; color: var(--ink-3); font-size: 12px; padding: 4px 7px; border-radius: 6px; }
+.acct-row:hover .acct-del, .acct-del:focus-visible { opacity: 1; }
+.acct-del:hover { background: var(--crit-wash); color: var(--crit); }
+.fchip.acct-chip { background: var(--accent-wash); border-color: var(--accent); color: var(--ink); font-weight: 600; }
