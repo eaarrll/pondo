@@ -9,7 +9,8 @@ import { dbFile } from './db.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const webDist = path.resolve(here, '../../web/dist');
-const port = +(process.env.PONDO_PORT ?? 4177);
+// PONDO_PORT wins, then a harness-assigned PORT (preview servers), then default.
+const port = +(process.env.PONDO_PORT ?? process.env.PORT ?? 4177);
 
 const app = Fastify({ logger: false });
 registerApi(app);
