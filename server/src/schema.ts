@@ -57,3 +57,18 @@ export const billPayments = sqliteTable('bill_payments', {
   paidOn: text('paid_on').notNull(),
   amountCents: integer('amount_cents').notNull(),
 });
+
+// Buy & sell side-business: one row per item, buy → sell lifecycle.
+// Sold = sale_date set; written off = sold with sale_price_cents = 0.
+export const flips = sqliteTable('flips', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  qty: integer('qty').notNull().default(1),
+  note: text('note').notNull().default(''),
+  buyDate: text('buy_date').notNull(),
+  buyCostCents: integer('buy_cost_cents').notNull(),
+  otherCostCents: integer('other_cost_cents').notNull().default(0), // fees, shipping, customs
+  saleDate: text('sale_date'),
+  salePriceCents: integer('sale_price_cents'),
+  saleFeesCents: integer('sale_fees_cents').notNull().default(0),
+});

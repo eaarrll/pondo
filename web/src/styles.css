@@ -323,3 +323,27 @@ h1 { font-size: 21px; margin: 0; letter-spacing: -0.015em; }
 .acct-row:hover .acct-del, .acct-del:focus-visible { opacity: 1; }
 .acct-del:hover { background: var(--crit-wash); color: var(--crit); }
 .fchip.acct-chip { background: var(--accent-wash); border-color: var(--accent); color: var(--ink); font-weight: 600; }
+
+/* buy & sell */
+.flip-scroll { overflow-x: auto; }
+.flip-row {
+  display: grid; grid-template-columns: 32px minmax(180px, 1fr) 110px 100px 120px 96px 84px;
+  gap: 10px; align-items: center; padding: 9px 6px; border-bottom: 1px solid var(--grid);
+  font-size: 14px; min-width: 720px;
+}
+.flip-row:hover { background: var(--surface-2); }
+.flip-head { border-bottom: 1px solid var(--hairline); padding: 4px 6px 8px; }
+.flip-head span { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.flip-head:hover { background: none; }
+.ra { text-align: right; }
+.flip-actions { display: flex; align-items: center; gap: 4px; justify-content: flex-end; }
+.flip-row .tx-del { opacity: 0; }
+.flip-row:hover .tx-del { opacity: 1; }
+.month-row {
+  display: grid; grid-template-columns: minmax(110px, 1fr) 110px 110px 120px 130px;
+  gap: 10px; padding: 7px 6px; border-bottom: 1px solid var(--grid); font-size: 13.5px; min-width: 600px;
+}
+.month-head { border-bottom: 1px solid var(--hairline); }
+.month-head span { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.writeoff-btn { color: var(--crit); }
+.writeoff-btn:hover { background: var(--crit-wash); }

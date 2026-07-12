@@ -5,9 +5,10 @@ import Transactions from './components/Transactions';
 import Accounts from './components/Accounts';
 import Budgets from './components/Budgets';
 import Bills from './components/Bills';
+import BuySell from './components/BuySell';
 import QuickAdd from './components/QuickAdd';
 
-export type Screen = 'dash' | 'tx' | 'accts' | 'bud' | 'bills';
+export type Screen = 'dash' | 'tx' | 'accts' | 'bud' | 'bills' | 'flips';
 
 export interface ScreenProps {
   boot: Bootstrap;
@@ -25,6 +26,7 @@ const NAV: { id: Screen; ico: string; label: string }[] = [
   { id: 'accts', ico: '▤', label: 'Accounts' },
   { id: 'bud', ico: '◔', label: 'Budgets' },
   { id: 'bills', ico: '⏱', label: 'Bills & Subs' },
+  { id: 'flips', ico: '⇋', label: 'Buy & Sell' },
 ];
 
 export default function App() {
@@ -112,6 +114,7 @@ export default function App() {
         {screen === 'accts' && <Accounts {...common} />}
         {screen === 'bud' && <Budgets {...common} />}
         {screen === 'bills' && <Bills {...common} />}
+        {screen === 'flips' && <BuySell {...common} />}
       </main>
 
       {addOpen && (

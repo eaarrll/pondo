@@ -67,6 +67,18 @@ CREATE TABLE IF NOT EXISTS bill_payments (
   paid_on TEXT NOT NULL,
   amount_cents INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS flips (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  qty INTEGER NOT NULL DEFAULT 1,
+  note TEXT NOT NULL DEFAULT '',
+  buy_date TEXT NOT NULL,
+  buy_cost_cents INTEGER NOT NULL,
+  other_cost_cents INTEGER NOT NULL DEFAULT 0,
+  sale_date TEXT,
+  sale_price_cents INTEGER,
+  sale_fees_cents INTEGER NOT NULL DEFAULT 0
+);
 `);
 
 export const db = drizzle(sqlite, { schema });

@@ -80,6 +80,34 @@ export interface NetWorth {
   series: { label: string; cents: number }[];
 }
 
+export interface FlipItem {
+  id: number;
+  name: string;
+  qty: number;
+  note: string;
+  buyDate: string;
+  buyCostCents: number;
+  otherCostCents: number;
+  saleDate: string | null;
+  salePriceCents: number | null;
+  saleFeesCents: number;
+  costCents: number;
+  proceedsCents: number | null;
+  profitCents: number | null;
+  status: 'stock' | 'sold' | 'writeoff';
+  daysHeld: number;
+}
+
+export interface FlipsData {
+  items: FlipItem[];
+  summary: {
+    cashInCents: number; cashOutCents: number; netCents: number;
+    tiedUpCents: number; stockCount: number;
+    realizedCents: number; soldCount: number; roiPct: number | null;
+  };
+  monthly: { month: string; inCents: number; outCents: number; netCents: number; runningCents: number }[];
+}
+
 // ---------- fetch helpers ----------
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
@@ -118,6 +146,13 @@ export const api = {
   }) => post<Bill>('/api/bills', body),
   payBill: (id: number) => post<{ ok: boolean; nextDue: string }>(`/api/bills/${id}/pay`, {}),
   networth: () => j<NetWorth>('/api/networth'),
+  flips: () => j<FlipsData>('/api/flips'),
+  addFlip: (body: { name: string; qty?: number; note?: string; buyDate?: string; buyCostCents: number; otherCostCents?: number }) =>
+    post<FlipItem>('/api/flips', body),
+  sellFlip: (id: number, body: { salePriceCents: number; saleFeesCents?: number; saleDate?: string }) =>
+    post<{ ok: boolean }>(`/api/flips/${id}/sell`, body),
+  unsellFlip: (id: number) => post<{ ok: boolean }>(`/api/flips/${id}/unsell`, {}),
+  delFlip: (id: number) => j<{ ok: boolean }>(`/api/flips/${id}`, { method: 'DELETE' }),
 };
 
 // ---------- formatting ----------

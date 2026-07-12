@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { db, sqlite } from './db.js';
-import { accounts, billPayments, bills, transactions } from './schema.js';
+import { accounts, billPayments, bills, flips, transactions } from './schema.js';
 import { periodInfo, type Period } from './summary.js';
 import { addDays, addMonths, MON, monthEnd, parse, today } from './dates.js';
 
@@ -303,5 +303,129 @@ export function registerApi(app: FastifyInstance): void {
       delta30Cents: netWorthAt(now) - netWorthAt(addDays(now, -30)),
       series,
     };
+  });
+
+  // ---------- buy & sell (flips) ----------
+  // Standalone side-business module: cash math is derived from the rows, never stored.
+  app.get('/api/flips', () => {
+    const rows = sqlite.prepare(`
+      SELECT id, name, qty, note, buy_date buyDate, buy_cost_cents buyCostCents,
+             other_cost_cents otherCostCents, sale_date saleDate,
+             sale_price_cents salePriceCents, sale_fees_cents saleFeesCents
+      FROM flips ORDER BY COALESCE(sale_date, buy_date) DESC, id DESC`).all() as {
+      id: number; name: string; qty: number; note: string;
+      buyDate: string; buyCostCents: number; otherCostCents: number;
+      saleDate: string | null; salePriceCents: number | null; saleFeesCents: number;
+    }[];
+    const now = today();
+    const items = rows.map(r => {
+      const costCents = r.buyCostCents + r.otherCostCents;
+      const sold = r.saleDate != null;
+      const proceedsCents = sold ? (r.salePriceCents ?? 0) - r.saleFeesCents : null;
+      const profitCents = sold ? (proceedsCents as number) - costCents : null;
+      const status = !sold ? 'stock' : (r.salePriceCents ?? 0) === 0 ? 'writeoff' : 'sold';
+      const daysHeld = Math.round(
+        (parse(sold ? (r.saleDate as string) : now).getTime() - parse(r.buyDate).getTime()) / 86_400_000,
+      );
+      return { ...r, costCents, proceedsCents, profitCents, status, daysHeld };
+    });
+
+    const sold = items.filter(i => i.saleDate != null);
+    const stock = items.filter(i => i.saleDate == null);
+    const cashInCents = sold.reduce((s, i) => s + (i.proceedsCents ?? 0), 0);
+    const cashOutCents = items.reduce((s, i) => s + i.costCents, 0);
+    const realizedCents = sold.reduce((s, i) => s + (i.profitCents ?? 0), 0);
+    const soldCost = sold.reduce((s, i) => s + i.costCents, 0);
+
+    // monthly in/out with running balance, first activity month → current month
+    const byMonth = new Map<string, { inCents: number; outCents: number }>();
+    const bump = (ym: string, key: 'inCents' | 'outCents', v: number) => {
+      const m = byMonth.get(ym) ?? { inCents: 0, outCents: 0 };
+      m[key] += v;
+      byMonth.set(ym, m);
+    };
+    for (const i of items) {
+      bump(i.buyDate.slice(0, 7), 'outCents', i.costCents);
+      if (i.saleDate) bump(i.saleDate.slice(0, 7), 'inCents', i.proceedsCents ?? 0);
+    }
+    const monthly: { month: string; inCents: number; outCents: number; netCents: number; runningCents: number }[] = [];
+    if (byMonth.size > 0) {
+      const first = [...byMonth.keys()].sort()[0];
+      let cur = first;
+      let running = 0;
+      const last = now.slice(0, 7);
+      while (cur <= last && monthly.length < 60) {
+        const m = byMonth.get(cur) ?? { inCents: 0, outCents: 0 };
+        running += m.inCents - m.outCents;
+        monthly.push({ month: cur, ...m, netCents: m.inCents - m.outCents, runningCents: running });
+        cur = addMonths(`${cur}-01`, 1).slice(0, 7);
+      }
+    }
+
+    return {
+      items,
+      summary: {
+        cashInCents, cashOutCents,
+        netCents: cashInCents - cashOutCents,
+        tiedUpCents: stock.reduce((s, i) => s + i.costCents, 0),
+        stockCount: stock.length,
+        realizedCents,
+        soldCount: sold.length,
+        roiPct: soldCost > 0 ? (realizedCents / soldCost) * 100 : null,
+      },
+      monthly,
+    };
+  });
+
+  app.post('/api/flips', (req, reply) => {
+    const b = req.body as {
+      name: string; qty?: number; note?: string; buyDate?: string;
+      buyCostCents: number; otherCostCents?: number;
+    };
+    if (!b.name?.trim()) return reply.code(400).send({ error: 'name is required' });
+    if (!Number.isInteger(b.buyCostCents) || b.buyCostCents < 0) {
+      return reply.code(400).send({ error: 'buyCostCents must be a non-negative integer' });
+    }
+    return db.insert(flips).values({
+      name: b.name.trim(),
+      qty: b.qty && b.qty > 0 ? Math.round(b.qty) : 1,
+      note: b.note ?? '',
+      buyDate: b.buyDate ?? today(),
+      buyCostCents: b.buyCostCents,
+      otherCostCents: Math.max(0, Math.round(b.otherCostCents ?? 0)),
+    }).returning().get();
+  });
+
+  // Sell (salePriceCents > 0) or write off (salePriceCents = 0)
+  app.post('/api/flips/:id/sell', (req, reply) => {
+    const id = +(req.params as { id: string }).id;
+    const b = req.body as { salePriceCents: number; saleFeesCents?: number; saleDate?: string };
+    const row = sqlite.prepare('SELECT id FROM flips WHERE id = ?').get(id);
+    if (!row) return reply.code(404).send({ error: 'item not found' });
+    if (!Number.isInteger(b.salePriceCents) || b.salePriceCents < 0) {
+      return reply.code(400).send({ error: 'salePriceCents must be a non-negative integer' });
+    }
+    db.update(flips).set({
+      saleDate: b.saleDate ?? today(),
+      salePriceCents: b.salePriceCents,
+      saleFeesCents: Math.max(0, Math.round(b.saleFeesCents ?? 0)),
+    }).where(eq(flips.id, id)).run();
+    return { ok: true };
+  });
+
+  // Undo a sale (back to stock)
+  app.post('/api/flips/:id/unsell', (req, reply) => {
+    const id = +(req.params as { id: string }).id;
+    const row = sqlite.prepare('SELECT id FROM flips WHERE id = ?').get(id);
+    if (!row) return reply.code(404).send({ error: 'item not found' });
+    db.update(flips).set({ saleDate: null, salePriceCents: null, saleFeesCents: 0 })
+      .where(eq(flips.id, id)).run();
+    return { ok: true };
+  });
+
+  app.delete('/api/flips/:id', (req) => {
+    const id = +(req.params as { id: string }).id;
+    db.delete(flips).where(eq(flips.id, id)).run();
+    return { ok: true };
   });
 }
