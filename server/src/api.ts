@@ -381,10 +381,16 @@ export function registerApi(app: FastifyInstance): void {
     const b = req.body as {
       name: string; qty?: number; note?: string; buyDate?: string;
       buyCostCents: number; otherCostCents?: number;
+      // optional: item was already sold — record the whole flip in one entry
+      salePriceCents?: number; saleFeesCents?: number; saleDate?: string;
     };
     if (!b.name?.trim()) return reply.code(400).send({ error: 'name is required' });
     if (!Number.isInteger(b.buyCostCents) || b.buyCostCents < 0) {
       return reply.code(400).send({ error: 'buyCostCents must be a non-negative integer' });
+    }
+    const sold = b.salePriceCents != null;
+    if (sold && (!Number.isInteger(b.salePriceCents) || (b.salePriceCents as number) < 0)) {
+      return reply.code(400).send({ error: 'salePriceCents must be a non-negative integer' });
     }
     return db.insert(flips).values({
       name: b.name.trim(),
@@ -393,6 +399,9 @@ export function registerApi(app: FastifyInstance): void {
       buyDate: b.buyDate ?? today(),
       buyCostCents: b.buyCostCents,
       otherCostCents: Math.max(0, Math.round(b.otherCostCents ?? 0)),
+      saleDate: sold ? (b.saleDate ?? today()) : null,
+      salePriceCents: sold ? (b.salePriceCents as number) : null,
+      saleFeesCents: sold ? Math.max(0, Math.round(b.saleFeesCents ?? 0)) : 0,
     }).returning().get();
   });
 

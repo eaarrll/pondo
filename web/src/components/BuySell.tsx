@@ -23,6 +23,10 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
   const [otherCost, setOtherCost] = useState('');
   const [buyDate, setBuyDate] = useState(todayStr());
   const [note, setNote] = useState('');
+  const [alreadySold, setAlreadySold] = useState(false);
+  const [soldPrice, setSoldPrice] = useState('');
+  const [soldFees, setSoldFees] = useState('');
+  const [soldDate, setSoldDate] = useState(todayStr());
 
   // sell form
   const [price, setPrice] = useState('');
@@ -36,13 +40,20 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
   const saveBuy = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !(cents(cost) >= 0)) return;
+    if (alreadySold && !(cents(soldPrice) > 0)) return;
     try {
       await api.addFlip({
         name: name.trim(), qty: Math.max(1, Math.round(+qty || 1)), note: note.trim(),
         buyDate, buyCostCents: cents(cost), otherCostCents: cents(otherCost),
+        ...(alreadySold ? {
+          salePriceCents: cents(soldPrice), saleFeesCents: cents(soldFees), saleDate: soldDate,
+        } : {}),
       });
-      showToast(`Purchase logged — ${name.trim()}`);
+      showToast(alreadySold
+        ? `Flip logged — ${name.trim()}, ${signedPeso(cents(soldPrice) - cents(soldFees) - cents(cost) - cents(otherCost))} profit`
+        : `Purchase logged — ${name.trim()}`);
       setBuyOpen(false); setName(''); setQty('1'); setCost(''); setOtherCost(''); setNote('');
+      setAlreadySold(false); setSoldPrice(''); setSoldFees('');
       refresh();
     } catch (err) { showToast(`Could not save: ${(err as Error).message}`); }
   };
@@ -89,7 +100,7 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
           <div className="top-sub">Side-business flips — per-item profit, stock, and cash flow</div>
         </div>
         <div className="spacer" />
-        <button className="add-btn" onClick={() => { setBuyDate(todayStr()); setBuyOpen(true); }}>＋ New purchase</button>
+        <button className="add-btn" onClick={() => { setBuyDate(todayStr()); setSoldDate(todayStr()); setBuyOpen(true); }}>＋ Add item</button>
       </div>
 
       <div className="grid g3">
@@ -197,7 +208,7 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
       {buyOpen && (
         <div className="overlay open" onClick={e => { if (e.target === e.currentTarget) setBuyOpen(false); }}>
           <form className="modal" onSubmit={saveBuy}>
-            <h2>New purchase</h2>
+            <h2>Add item</h2>
             <div className="frow">
               <label className="fld-label">Item</label>
               <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Wilson Ultra v5" autoFocus />
@@ -226,9 +237,39 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
                 <input className="inp" value={note} onChange={e => setNote(e.target.value)} placeholder="supplier, condition…" />
               </div>
             </div>
+            <label className="check">
+              <input type="checkbox" checked={alreadySold} onChange={e => setAlreadySold(e.target.checked)} />
+              Already sold — record the sale too
+            </label>
+            {alreadySold && (
+              <div className="frow2">
+                <div style={{ flex: 2 }}>
+                  <label className="fld-label">Sale price (₱)</label>
+                  <input className="inp" value={soldPrice} onChange={e => setSoldPrice(e.target.value)} inputMode="decimal" placeholder="0.00" />
+                </div>
+                <div style={{ flex: 2 }}>
+                  <label className="fld-label">Fees (₱)</label>
+                  <input className="inp" value={soldFees} onChange={e => setSoldFees(e.target.value)} inputMode="decimal" placeholder="platform / shipping" />
+                </div>
+                <div style={{ flex: 2 }}>
+                  <label className="fld-label">Sold on</label>
+                  <input className="inp" type="date" value={soldDate} min={buyDate} max={todayStr()} onChange={e => setSoldDate(e.target.value)} />
+                </div>
+              </div>
+            )}
+            {alreadySold && parseFloat(soldPrice) > 0 && (
+              <div className="tx-meta" style={{ marginBottom: 12 }}>
+                Profit: <b className={cents(soldPrice) - cents(soldFees) - cents(cost) - cents(otherCost) >= 0 ? 'up' : 'down'}>
+                  {signedPeso(cents(soldPrice) - cents(soldFees) - cents(cost) - cents(otherCost))}
+                </b>
+              </div>
+            )}
             <div className="modal-foot">
               <button type="button" className="ghost-btn" onClick={() => setBuyOpen(false)}>Cancel</button>
-              <button type="submit" className="save-btn" disabled={!name.trim() || !(parseFloat(cost) >= 0)}>Add purchase</button>
+              <button type="submit" className="save-btn"
+                disabled={!name.trim() || !(parseFloat(cost) >= 0) || (alreadySold && !(parseFloat(soldPrice) > 0))}>
+                {alreadySold ? 'Add sold item' : 'Add purchase'}
+              </button>
             </div>
           </form>
         </div>

@@ -147,8 +147,11 @@ export const api = {
   payBill: (id: number) => post<{ ok: boolean; nextDue: string }>(`/api/bills/${id}/pay`, {}),
   networth: () => j<NetWorth>('/api/networth'),
   flips: () => j<FlipsData>('/api/flips'),
-  addFlip: (body: { name: string; qty?: number; note?: string; buyDate?: string; buyCostCents: number; otherCostCents?: number }) =>
-    post<FlipItem>('/api/flips', body),
+  addFlip: (body: {
+    name: string; qty?: number; note?: string; buyDate?: string;
+    buyCostCents: number; otherCostCents?: number;
+    salePriceCents?: number; saleFeesCents?: number; saleDate?: string;
+  }) => post<FlipItem>('/api/flips', body),
   sellFlip: (id: number, body: { salePriceCents: number; saleFeesCents?: number; saleDate?: string }) =>
     post<{ ok: boolean }>(`/api/flips/${id}/sell`, body),
   unsellFlip: (id: number) => post<{ ok: boolean }>(`/api/flips/${id}/unsell`, {}),
