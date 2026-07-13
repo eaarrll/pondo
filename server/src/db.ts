@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS bill_payments (
 );
 CREATE TABLE IF NOT EXISTS flips (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL DEFAULT 'item' CHECK (kind IN ('item','cost')),
   name TEXT NOT NULL,
   qty INTEGER NOT NULL DEFAULT 1,
   note TEXT NOT NULL DEFAULT '',
@@ -77,11 +78,32 @@ CREATE TABLE IF NOT EXISTS flips (
   other_cost_cents INTEGER NOT NULL DEFAULT 0,
   sale_date TEXT,
   sale_price_cents INTEGER,
-  sale_fees_cents INTEGER NOT NULL DEFAULT 0
+  sale_fees_cents INTEGER NOT NULL DEFAULT 0,
+  buy_tx_id INTEGER REFERENCES transactions(id),
+  sale_tx_id INTEGER REFERENCES transactions(id)
 );
 `);
 
+// additive migrations for databases created before these columns existed
+const flipCols = sqlite.prepare('PRAGMA table_info(flips)').all() as { name: string }[];
+if (!flipCols.some(c => c.name === 'kind')) {
+  sqlite.exec("ALTER TABLE flips ADD COLUMN kind TEXT NOT NULL DEFAULT 'item'");
+}
+if (!flipCols.some(c => c.name === 'buy_tx_id')) {
+  sqlite.exec('ALTER TABLE flips ADD COLUMN buy_tx_id INTEGER REFERENCES transactions(id)');
+  sqlite.exec('ALTER TABLE flips ADD COLUMN sale_tx_id INTEGER REFERENCES transactions(id)');
+}
+
 export const db = drizzle(sqlite, { schema });
+
+// dedicated ledger categories for the Buy & Sell module
+export function ensureCategory(name: string, kind: 'expense' | 'income', icon: string): number {
+  const row = sqlite.prepare('SELECT id FROM categories WHERE name = ? AND kind = ?').get(name, kind) as { id: number } | undefined;
+  if (row) return row.id;
+  return Number(sqlite.prepare(
+    'INSERT INTO categories (name, kind, icon, sort) VALUES (?, ?, ?, 99)',
+  ).run(name, kind, icon).lastInsertRowid);
+}
 
 const DEFAULT_CATEGORIES: [string, 'expense' | 'income', string][] = [
   ['Groceries', 'expense', '🛒'],

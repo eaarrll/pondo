@@ -1,24 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, peso, todayStr, type Account, type Category } from '../api';
+import { api, peso, todayStr, type Account, type Category, type Tx } from '../api';
 
 type TxType = 'expense' | 'income' | 'transfer';
 const TITLES: Record<TxType, string> = {
   expense: 'Add expense', income: 'Add income', transfer: 'Record transfer',
 };
 
-export default function QuickAdd({ accounts, categories, onClose, onSaved }: {
+export default function QuickAdd({ accounts, categories, onClose, onSaved, edit }: {
   accounts: Account[];
   categories: Category[];
   onClose: () => void;
   onSaved: (msg: string) => void;
+  edit?: Tx | null;
 }) {
-  const [type, setType] = useState<TxType>('expense');
-  const [amount, setAmount] = useState('');
-  const [catId, setCatId] = useState<number | null>(null);
-  const [fromId, setFromId] = useState<number | null>(null);
-  const [toId, setToId] = useState<number | null>(null);
-  const [note, setNote] = useState('');
-  const [date, setDate] = useState(todayStr());
+  const [type, setType] = useState<TxType>(edit?.type ?? 'expense');
+  const [amount, setAmount] = useState(edit ? String(edit.amountCents / 100) : '');
+  const [catId, setCatId] = useState<number | null>(edit?.categoryId ?? null);
+  const [fromId, setFromId] = useState<number | null>(edit?.accountId ?? null);
+  const [toId, setToId] = useState<number | null>(edit?.toAccountId ?? null);
+  const [note, setNote] = useState(edit?.note ?? '');
+  const [date, setDate] = useState(edit?.occurredOn ?? todayStr());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const amtRef = useRef<HTMLInputElement>(null);
@@ -42,15 +43,17 @@ export default function QuickAdd({ accounts, categories, onClose, onSaved }: {
     if (!valid || saving) return;
     setSaving(true);
     try {
-      await api.addTx({
+      const body = {
         type, amountCents,
         categoryId: type === 'transfer' ? undefined : catId!,
         accountId: fromId!,
         toAccountId: type === 'transfer' ? toId! : undefined,
         note: note.trim(), occurredOn: date,
-      });
+      };
+      if (edit) await api.updateTx(edit.id, body);
+      else await api.addTx(body);
       const catName = cats.find(c => c.id === catId)?.name;
-      onSaved(`Saved — ${type} of ${peso(amountCents)}${type !== 'transfer' && catName ? ' · ' + catName : ''}`);
+      onSaved(`${edit ? 'Updated' : 'Saved'} — ${type} of ${peso(amountCents)}${type !== 'transfer' && catName ? ' · ' + catName : ''}`);
     } catch (err) {
       setSaving(false);
       setError(`Could not save: ${(err as Error).message}`);
@@ -63,8 +66,8 @@ export default function QuickAdd({ accounts, categories, onClose, onSaved }: {
 
   return (
     <div className="overlay open" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <form className="modal" onSubmit={save} aria-label={TITLES[type]}>
-        <h2>{TITLES[type]}</h2>
+      <form className="modal" onSubmit={save} aria-label={edit ? 'Edit transaction' : TITLES[type]}>
+        <h2>{edit ? `Edit ${type}` : TITLES[type]}</h2>
         <div className="type-seg">
           {(['expense', 'income', 'transfer'] as TxType[]).map(t => (
             <button type="button" key={t} className={type === t ? 'on' : ''} onClick={() => switchType(t)}>

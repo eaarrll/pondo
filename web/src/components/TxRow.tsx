@@ -1,6 +1,10 @@
 import { peso, signedPeso, type Tx } from '../api';
 
-export default function TxRow({ tx, onDelete }: { tx: Tx; onDelete?: (tx: Tx) => void }) {
+export default function TxRow({ tx, onDelete, onEdit }: {
+  tx: Tx;
+  onDelete?: (tx: Tx) => void;
+  onEdit?: (tx: Tx) => void;
+}) {
   const isTr = tx.type === 'transfer';
   const isIn = tx.type === 'income';
   const title = tx.note || tx.catName || (isTr ? 'Transfer' : 'Transaction');
@@ -16,6 +20,9 @@ export default function TxRow({ tx, onDelete }: { tx: Tx; onDelete?: (tx: Tx) =>
       <div className={`tx-amt num ${isIn ? 'in' : ''}`}>
         {isTr ? peso(tx.amountCents) : signedPeso(isIn ? tx.amountCents : -tx.amountCents)}
       </div>
+      {onEdit && (
+        <button className="tx-edit" title="Edit transaction" onClick={() => onEdit(tx)}>✎</button>
+      )}
       {onDelete && (
         <button className="tx-del" title="Delete transaction" onClick={() => onDelete(tx)}>✕</button>
       )}

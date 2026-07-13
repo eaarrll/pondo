@@ -82,6 +82,7 @@ export interface NetWorth {
 
 export interface FlipItem {
   id: number;
+  kind: 'item' | 'cost';
   name: string;
   qty: number;
   note: string;
@@ -94,8 +95,12 @@ export interface FlipItem {
   costCents: number;
   proceedsCents: number | null;
   profitCents: number | null;
-  status: 'stock' | 'sold' | 'writeoff';
+  status: 'stock' | 'sold' | 'writeoff' | 'cost';
   daysHeld: number;
+  buyTxId: number | null;
+  saleTxId: number | null;
+  buyAcctName: string | null;
+  saleAcctName: string | null;
 }
 
 export interface FlipsData {
@@ -103,7 +108,7 @@ export interface FlipsData {
   summary: {
     cashInCents: number; cashOutCents: number; netCents: number;
     tiedUpCents: number; stockCount: number;
-    realizedCents: number; soldCount: number; roiPct: number | null;
+    realizedCents: number; soldCount: number; opCostCents: number; roiPct: number | null;
   };
   monthly: { month: string; inCents: number; outCents: number; netCents: number; runningCents: number }[];
 }
@@ -132,6 +137,10 @@ export const api = {
     accountId: number; toAccountId?: number; note?: string; occurredOn?: string;
   }) => post<Tx>('/api/transactions', body),
   delTx: (id: number) => j<{ ok: boolean }>(`/api/transactions/${id}`, { method: 'DELETE' }),
+  updateTx: (id: number, body: {
+    type: string; amountCents: number; categoryId?: number | null;
+    accountId: number; toAccountId?: number | null; note?: string; occurredOn?: string;
+  }) => post<Tx>(`/api/transactions/${id}`, body, 'PATCH'),
   addAccount: (body: { name: string; type: string; subtitle?: string; openingCents?: number }) =>
     post<Account>('/api/accounts', body),
   delAccount: (id: number) =>
@@ -148,11 +157,12 @@ export const api = {
   networth: () => j<NetWorth>('/api/networth'),
   flips: () => j<FlipsData>('/api/flips'),
   addFlip: (body: {
-    name: string; qty?: number; note?: string; buyDate?: string;
+    kind?: 'item' | 'cost'; name: string; qty?: number; note?: string; buyDate?: string;
     buyCostCents: number; otherCostCents?: number;
     salePriceCents?: number; saleFeesCents?: number; saleDate?: string;
+    accountId?: number; saleAccountId?: number;
   }) => post<FlipItem>('/api/flips', body),
-  sellFlip: (id: number, body: { salePriceCents: number; saleFeesCents?: number; saleDate?: string }) =>
+  sellFlip: (id: number, body: { salePriceCents: number; saleFeesCents?: number; saleDate?: string; accountId?: number }) =>
     post<{ ok: boolean }>(`/api/flips/${id}/sell`, body),
   unsellFlip: (id: number) => post<{ ok: boolean }>(`/api/flips/${id}/unsell`, {}),
   delFlip: (id: number) => j<{ ok: boolean }>(`/api/flips/${id}`, { method: 'DELETE' }),

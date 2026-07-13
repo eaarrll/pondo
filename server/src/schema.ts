@@ -60,8 +60,10 @@ export const billPayments = sqliteTable('bill_payments', {
 
 // Buy & sell side-business: one row per item, buy → sell lifecycle.
 // Sold = sale_date set; written off = sold with sale_price_cents = 0.
+// kind 'cost' = operational expense (customs, supplies) — cash out with nothing to sell.
 export const flips = sqliteTable('flips', {
   id: integer('id').primaryKey({ autoIncrement: true }),
+  kind: text('kind').notNull().default('item'), // item | cost
   name: text('name').notNull(),
   qty: integer('qty').notNull().default(1),
   note: text('note').notNull().default(''),
@@ -71,4 +73,7 @@ export const flips = sqliteTable('flips', {
   saleDate: text('sale_date'),
   salePriceCents: integer('sale_price_cents'),
   saleFeesCents: integer('sale_fees_cents').notNull().default(0),
+  // optional ledger links: the expense/income rows this flip created
+  buyTxId: integer('buy_tx_id'),
+  saleTxId: integer('sale_tx_id'),
 });

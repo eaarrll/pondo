@@ -43,9 +43,16 @@ If something else grabs port 80, Pondo logs it and keeps working on `:4177`.
 
 ## Where your data lives
 
-Everything is in **`data/pondo.db`** (SQLite, WAL mode). Backing up = copying that
-file (`npm run backup`), restoring = copying it back. Set `PONDO_DATA=/some/dir`
-to keep it elsewhere (e.g. an iCloud/Syncthing folder).
+Everything is in **`data/pondo.db`** (SQLite, WAL mode). The server takes an
+**automatic daily backup** to `backups/auto-YYYY-MM-DD.db` (last 14 kept) using
+SQLite's native backup API; `npm run backup` still works for manual snapshots.
+Restoring = copying a backup over `data/pondo.db`. Set `PONDO_DATA=/some/dir`
+to keep the live file elsewhere (e.g. an iCloud/Syncthing folder). You can also
+export the full ledger as CSV from the Transactions screen (or
+`GET /api/export/transactions.csv`).
+
+Bills marked **autopay** log their expense automatically on the due date and
+advance to the next cycle; stale past dues advance without logging.
 
 ## Conventions
 

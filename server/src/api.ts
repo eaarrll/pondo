@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
-import { db, sqlite } from './db.js';
+import { db, ensureCategory, sqlite } from './db.js';
 import { accounts, billPayments, bills, flips, transactions } from './schema.js';
 import { periodInfo, type Period } from './summary.js';
 import { addDays, addMonths, MON, monthEnd, parse, today } from './dates.js';
@@ -88,15 +88,33 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   // ---------- transactions ----------
+  const TX_SORTS: Record<string, string> = {
+    date_desc: 't.occurred_on DESC, t.id DESC',
+    date_asc: 't.occurred_on ASC, t.id ASC',
+    amount_desc: 't.amount_cents DESC, t.occurred_on DESC, t.id DESC',
+    amount_asc: 't.amount_cents ASC, t.occurred_on DESC, t.id DESC',
+  };
+
   app.get('/api/transactions', (req) => {
-    const q = req.query as { type?: string; accountId?: string; limit?: string };
+    const q = req.query as {
+      type?: string; accountId?: string; categoryId?: string;
+      from?: string; to?: string; q?: string; sort?: string; limit?: string;
+    };
     const where: string[] = [];
     const args: unknown[] = [];
     if (q.type) { where.push('t.type = ?'); args.push(q.type); }
     if (q.accountId) { where.push('(t.account_id = ? OR t.to_account_id = ?)'); args.push(+q.accountId, +q.accountId); }
+    if (q.categoryId) { where.push('t.category_id = ?'); args.push(+q.categoryId); }
+    if (q.from) { where.push('t.occurred_on >= ?'); args.push(q.from); }
+    if (q.to) { where.push('t.occurred_on <= ?'); args.push(q.to); }
+    if (q.q?.trim()) {
+      where.push('(t.note LIKE ? OR c.name LIKE ? OR a.name LIKE ?)');
+      const like = `%${q.q.trim()}%`;
+      args.push(like, like, like);
+    }
     const sql = `${TX_SELECT}
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-      ORDER BY t.occurred_on DESC, t.id DESC LIMIT ?`;
+      ORDER BY ${TX_SORTS[q.sort ?? ''] ?? TX_SORTS.date_desc} LIMIT ?`;
     args.push(Math.min(+(q.limit ?? 200), 1000));
     return sqlite.prepare(sql).all(...args);
   });
@@ -132,9 +150,75 @@ export function registerApi(app: FastifyInstance): void {
     return sqlite.prepare(`${TX_SELECT} WHERE t.id = ?`).get(row.id);
   });
 
+  app.patch('/api/transactions/:id', (req, reply) => {
+    const id = +(req.params as { id: string }).id;
+    const existing = sqlite.prepare('SELECT * FROM transactions WHERE id = ?').get(id) as {
+      type: string; amount_cents: number; category_id: number | null;
+      account_id: number; to_account_id: number | null; note: string; occurred_on: string;
+    } | undefined;
+    if (!existing) return reply.code(404).send({ error: 'transaction not found' });
+    const b = req.body as Partial<{
+      type: string; amountCents: number; categoryId: number | null;
+      accountId: number; toAccountId: number | null; note: string; occurredOn: string;
+    }>;
+    const type = b.type ?? existing.type;
+    const amountCents = b.amountCents ?? existing.amount_cents;
+    const categoryId = b.categoryId !== undefined ? b.categoryId : existing.category_id;
+    const accountId = b.accountId ?? existing.account_id;
+    const toAccountId = b.toAccountId !== undefined ? b.toAccountId : existing.to_account_id;
+    if (!['expense', 'income', 'transfer'].includes(type)) {
+      return reply.code(400).send({ error: 'invalid type' });
+    }
+    if (!Number.isInteger(amountCents) || amountCents <= 0) {
+      return reply.code(400).send({ error: 'amountCents must be a positive integer' });
+    }
+    if (type === 'transfer') {
+      if (!toAccountId || toAccountId === accountId) {
+        return reply.code(400).send({ error: 'transfer needs a distinct toAccountId' });
+      }
+    } else if (!categoryId) {
+      return reply.code(400).send({ error: 'expense/income needs a categoryId' });
+    }
+    db.update(transactions).set({
+      type,
+      amountCents,
+      categoryId: type === 'transfer' ? null : categoryId,
+      accountId,
+      toAccountId: type === 'transfer' ? toAccountId : null,
+      note: b.note ?? existing.note,
+      occurredOn: b.occurredOn ?? existing.occurred_on,
+    }).where(eq(transactions.id, id)).run();
+    return sqlite.prepare(`${TX_SELECT} WHERE t.id = ?`).get(id);
+  });
+
+  // full ledger as CSV — oldest first, for spreadsheets and taxes
+  app.get('/api/export/transactions.csv', (_req, reply) => {
+    const rows = sqlite.prepare(`${TX_SELECT} ORDER BY t.occurred_on ASC, t.id ASC`).all() as {
+      occurredOn: string; type: string; amountCents: number;
+      catName: string | null; acctName: string; toName: string | null; note: string;
+    }[];
+    const esc = (v: unknown) => {
+      const s = String(v ?? '');
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = ['date,type,amount_php,category,account,to_account,note'];
+    for (const r of rows) {
+      lines.push([
+        r.occurredOn, r.type, (r.amountCents / 100).toFixed(2),
+        r.catName ?? '', r.acctName, r.toName ?? '', r.note,
+      ].map(esc).join(','));
+    }
+    reply.header('Content-Type', 'text/csv; charset=utf-8');
+    reply.header('Content-Disposition', 'attachment; filename="pondo-transactions.csv"');
+    return lines.join('\n') + '\n';
+  });
+
   app.delete('/api/transactions/:id', (req) => {
     const id = +(req.params as { id: string }).id;
     sqlite.prepare('DELETE FROM bill_payments WHERE transaction_id = ?').run(id);
+    // a flip's linked ledger row may be deleted directly — unlink, don't dangle
+    sqlite.prepare('UPDATE flips SET buy_tx_id = NULL WHERE buy_tx_id = ?').run(id);
+    sqlite.prepare('UPDATE flips SET sale_tx_id = NULL WHERE sale_tx_id = ?').run(id);
     db.delete(transactions).where(eq(transactions.id, id)).run();
     return { ok: true };
   });
@@ -174,6 +258,8 @@ export function registerApi(app: FastifyInstance): void {
       for (const t of txIds) unlinkPay.run(t.id);
       sqlite.prepare('DELETE FROM transactions WHERE account_id = ? OR to_account_id = ?').run(id, id);
       sqlite.prepare('UPDATE bills SET account_id = NULL WHERE account_id = ?').run(id);
+      sqlite.prepare('UPDATE flips SET buy_tx_id = NULL WHERE buy_tx_id NOT IN (SELECT id FROM transactions)').run();
+      sqlite.prepare('UPDATE flips SET sale_tx_id = NULL WHERE sale_tx_id NOT IN (SELECT id FROM transactions)').run();
       sqlite.prepare('DELETE FROM accounts WHERE id = ?').run(id);
       return txIds.length;
     });
@@ -309,17 +395,30 @@ export function registerApi(app: FastifyInstance): void {
   // Standalone side-business module: cash math is derived from the rows, never stored.
   app.get('/api/flips', () => {
     const rows = sqlite.prepare(`
-      SELECT id, name, qty, note, buy_date buyDate, buy_cost_cents buyCostCents,
-             other_cost_cents otherCostCents, sale_date saleDate,
-             sale_price_cents salePriceCents, sale_fees_cents saleFeesCents
-      FROM flips ORDER BY COALESCE(sale_date, buy_date) DESC, id DESC`).all() as {
-      id: number; name: string; qty: number; note: string;
+      SELECT f.id, f.kind, f.name, f.qty, f.note, f.buy_date buyDate, f.buy_cost_cents buyCostCents,
+             f.other_cost_cents otherCostCents, f.sale_date saleDate,
+             f.sale_price_cents salePriceCents, f.sale_fees_cents saleFeesCents,
+             f.buy_tx_id buyTxId, f.sale_tx_id saleTxId,
+             ba.name buyAcctName, sa.name saleAcctName
+      FROM flips f
+      LEFT JOIN transactions bt ON bt.id = f.buy_tx_id
+      LEFT JOIN accounts ba ON ba.id = bt.account_id
+      LEFT JOIN transactions st ON st.id = f.sale_tx_id
+      LEFT JOIN accounts sa ON sa.id = st.account_id
+      ORDER BY COALESCE(f.sale_date, f.buy_date) DESC, f.id DESC`).all() as {
+      id: number; kind: string; name: string; qty: number; note: string;
       buyDate: string; buyCostCents: number; otherCostCents: number;
       saleDate: string | null; salePriceCents: number | null; saleFeesCents: number;
+      buyTxId: number | null; saleTxId: number | null;
+      buyAcctName: string | null; saleAcctName: string | null;
     }[];
     const now = today();
     const items = rows.map(r => {
       const costCents = r.buyCostCents + r.otherCostCents;
+      if (r.kind === 'cost') {
+        // operational expense: instant realized loss, never stock, nothing to sell
+        return { ...r, costCents, proceedsCents: null, profitCents: -costCents, status: 'cost', daysHeld: 0 };
+      }
       const sold = r.saleDate != null;
       const proceedsCents = sold ? (r.salePriceCents ?? 0) - r.saleFeesCents : null;
       const profitCents = sold ? (proceedsCents as number) - costCents : null;
@@ -330,11 +429,14 @@ export function registerApi(app: FastifyInstance): void {
       return { ...r, costCents, proceedsCents, profitCents, status, daysHeld };
     });
 
-    const sold = items.filter(i => i.saleDate != null);
-    const stock = items.filter(i => i.saleDate == null);
+    const sold = items.filter(i => i.status === 'sold' || i.status === 'writeoff');
+    const stock = items.filter(i => i.status === 'stock');
+    const opCosts = items.filter(i => i.status === 'cost');
     const cashInCents = sold.reduce((s, i) => s + (i.proceedsCents ?? 0), 0);
     const cashOutCents = items.reduce((s, i) => s + i.costCents, 0);
-    const realizedCents = sold.reduce((s, i) => s + (i.profitCents ?? 0), 0);
+    // business P&L: flip profits minus operational costs (ROI stays items-only)
+    const soldProfitCents = sold.reduce((s, i) => s + (i.profitCents ?? 0), 0);
+    const realizedCents = soldProfitCents - opCosts.reduce((s, i) => s + i.costCents, 0);
     const soldCost = sold.reduce((s, i) => s + i.costCents, 0);
 
     // monthly in/out with running balance, first activity month → current month
@@ -371,70 +473,135 @@ export function registerApi(app: FastifyInstance): void {
         stockCount: stock.length,
         realizedCents,
         soldCount: sold.length,
-        roiPct: soldCost > 0 ? (realizedCents / soldCost) * 100 : null,
+        opCostCents: opCosts.reduce((s, i) => s + i.costCents, 0),
+        roiPct: soldCost > 0 ? (soldProfitCents / soldCost) * 100 : null,
       },
       monthly,
     };
   });
 
+  // create the linked ledger row for a flip's cash movement
+  const flipLedgerTx = (dir: 'buy' | 'sale', name: string, amountCents: number, accountId: number, date: string) =>
+    db.insert(transactions).values({
+      type: dir === 'buy' ? 'expense' : 'income',
+      amountCents,
+      categoryId: dir === 'buy'
+        ? ensureCategory('Buy & Sell', 'expense', '📦')
+        : ensureCategory('Buy & Sell', 'income', '🏷️'),
+      accountId,
+      note: name,
+      occurredOn: date,
+      createdAt: new Date().toISOString(),
+    }).returning().get();
+
+  const accountExists = (id: number) =>
+    !!sqlite.prepare('SELECT id FROM accounts WHERE id = ? AND archived = 0').get(id);
+
   app.post('/api/flips', (req, reply) => {
     const b = req.body as {
-      name: string; qty?: number; note?: string; buyDate?: string;
+      kind?: string; name: string; qty?: number; note?: string; buyDate?: string;
       buyCostCents: number; otherCostCents?: number;
       // optional: item was already sold — record the whole flip in one entry
       salePriceCents?: number; saleFeesCents?: number; saleDate?: string;
+      // optional ledger links
+      accountId?: number; saleAccountId?: number;
     };
+    const kind = b.kind ?? 'item';
+    if (!['item', 'cost'].includes(kind)) return reply.code(400).send({ error: 'invalid kind' });
     if (!b.name?.trim()) return reply.code(400).send({ error: 'name is required' });
     if (!Number.isInteger(b.buyCostCents) || b.buyCostCents < 0) {
       return reply.code(400).send({ error: 'buyCostCents must be a non-negative integer' });
     }
-    const sold = b.salePriceCents != null;
+    const sold = kind === 'item' && b.salePriceCents != null;
     if (sold && (!Number.isInteger(b.salePriceCents) || (b.salePriceCents as number) < 0)) {
       return reply.code(400).send({ error: 'salePriceCents must be a non-negative integer' });
     }
-    return db.insert(flips).values({
-      name: b.name.trim(),
-      qty: b.qty && b.qty > 0 ? Math.round(b.qty) : 1,
-      note: b.note ?? '',
-      buyDate: b.buyDate ?? today(),
-      buyCostCents: b.buyCostCents,
-      otherCostCents: Math.max(0, Math.round(b.otherCostCents ?? 0)),
-      saleDate: sold ? (b.saleDate ?? today()) : null,
-      salePriceCents: sold ? (b.salePriceCents as number) : null,
-      saleFeesCents: sold ? Math.max(0, Math.round(b.saleFeesCents ?? 0)) : 0,
-    }).returning().get();
+    if (b.accountId && !accountExists(b.accountId)) return reply.code(400).send({ error: 'unknown accountId' });
+    if (b.saleAccountId && !accountExists(b.saleAccountId)) return reply.code(400).send({ error: 'unknown saleAccountId' });
+
+    const name = b.name.trim();
+    const buyDate = b.buyDate ?? today();
+    const totalCost = b.buyCostCents + (kind === 'cost' ? 0 : Math.max(0, Math.round(b.otherCostCents ?? 0)));
+    const proceeds = sold ? (b.salePriceCents as number) - Math.max(0, Math.round(b.saleFeesCents ?? 0)) : 0;
+
+    const run = sqlite.transaction(() => {
+      const buyTx = b.accountId && totalCost > 0
+        ? flipLedgerTx('buy', name, totalCost, b.accountId, buyDate) : null;
+      const saleTx = sold && b.saleAccountId && proceeds > 0
+        ? flipLedgerTx('sale', name, proceeds, b.saleAccountId, b.saleDate ?? today()) : null;
+      return db.insert(flips).values({
+        kind,
+        name,
+        qty: kind === 'cost' ? 1 : (b.qty && b.qty > 0 ? Math.round(b.qty) : 1),
+        note: b.note ?? '',
+        buyDate,
+        buyCostCents: b.buyCostCents,
+        otherCostCents: kind === 'cost' ? 0 : Math.max(0, Math.round(b.otherCostCents ?? 0)),
+        saleDate: sold ? (b.saleDate ?? today()) : null,
+        salePriceCents: sold ? (b.salePriceCents as number) : null,
+        saleFeesCents: sold ? Math.max(0, Math.round(b.saleFeesCents ?? 0)) : 0,
+        buyTxId: buyTx?.id ?? null,
+        saleTxId: saleTx?.id ?? null,
+      }).returning().get();
+    });
+    return run();
   });
 
   // Sell (salePriceCents > 0) or write off (salePriceCents = 0)
   app.post('/api/flips/:id/sell', (req, reply) => {
     const id = +(req.params as { id: string }).id;
-    const b = req.body as { salePriceCents: number; saleFeesCents?: number; saleDate?: string };
-    const row = sqlite.prepare('SELECT id FROM flips WHERE id = ?').get(id);
+    const b = req.body as { salePriceCents: number; saleFeesCents?: number; saleDate?: string; accountId?: number };
+    const row = sqlite.prepare('SELECT id, kind, name FROM flips WHERE id = ?').get(id) as { kind: string; name: string } | undefined;
     if (!row) return reply.code(404).send({ error: 'item not found' });
+    if (row.kind === 'cost') return reply.code(400).send({ error: 'operational costs cannot be sold' });
     if (!Number.isInteger(b.salePriceCents) || b.salePriceCents < 0) {
       return reply.code(400).send({ error: 'salePriceCents must be a non-negative integer' });
     }
-    db.update(flips).set({
-      saleDate: b.saleDate ?? today(),
-      salePriceCents: b.salePriceCents,
-      saleFeesCents: Math.max(0, Math.round(b.saleFeesCents ?? 0)),
-    }).where(eq(flips.id, id)).run();
+    if (b.accountId && !accountExists(b.accountId)) return reply.code(400).send({ error: 'unknown accountId' });
+    const fees = Math.max(0, Math.round(b.saleFeesCents ?? 0));
+    const proceeds = b.salePriceCents - fees;
+    const saleDate = b.saleDate ?? today();
+    const run = sqlite.transaction(() => {
+      const saleTx = b.accountId && proceeds > 0
+        ? flipLedgerTx('sale', row.name, proceeds, b.accountId, saleDate) : null;
+      db.update(flips).set({
+        saleDate,
+        salePriceCents: b.salePriceCents,
+        saleFeesCents: fees,
+        saleTxId: saleTx?.id ?? null,
+      }).where(eq(flips.id, id)).run();
+    });
+    run();
     return { ok: true };
   });
 
-  // Undo a sale (back to stock)
+  // Undo a sale (back to stock) — removes the linked income row too
   app.post('/api/flips/:id/unsell', (req, reply) => {
     const id = +(req.params as { id: string }).id;
-    const row = sqlite.prepare('SELECT id FROM flips WHERE id = ?').get(id);
+    const row = sqlite.prepare('SELECT id, kind, sale_tx_id saleTxId FROM flips WHERE id = ?').get(id) as
+      { kind: string; saleTxId: number | null } | undefined;
     if (!row) return reply.code(404).send({ error: 'item not found' });
-    db.update(flips).set({ saleDate: null, salePriceCents: null, saleFeesCents: 0 })
-      .where(eq(flips.id, id)).run();
+    if (row.kind === 'cost') return reply.code(400).send({ error: 'operational costs have no sale to undo' });
+    const run = sqlite.transaction(() => {
+      db.update(flips).set({ saleDate: null, salePriceCents: null, saleFeesCents: 0, saleTxId: null })
+        .where(eq(flips.id, id)).run();
+      if (row.saleTxId) db.delete(transactions).where(eq(transactions.id, row.saleTxId)).run();
+    });
+    run();
     return { ok: true };
   });
 
+  // Deleting a flip removes its linked ledger rows with it
   app.delete('/api/flips/:id', (req) => {
     const id = +(req.params as { id: string }).id;
-    db.delete(flips).where(eq(flips.id, id)).run();
+    const row = sqlite.prepare('SELECT buy_tx_id buyTxId, sale_tx_id saleTxId FROM flips WHERE id = ?').get(id) as
+      { buyTxId: number | null; saleTxId: number | null } | undefined;
+    const run = sqlite.transaction(() => {
+      db.delete(flips).where(eq(flips.id, id)).run();
+      if (row?.buyTxId) db.delete(transactions).where(eq(transactions.id, row.buyTxId)).run();
+      if (row?.saleTxId) db.delete(transactions).where(eq(transactions.id, row.saleTxId)).run();
+    });
+    run();
     return { ok: true };
   });
 }

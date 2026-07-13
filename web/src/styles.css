@@ -347,3 +347,30 @@ h1 { font-size: 21px; margin: 0; letter-spacing: -0.015em; }
 .month-head span { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
 .writeoff-btn { color: var(--crit); }
 .writeoff-btn:hover { background: var(--crit-wash); }
+.type-seg.two { grid-template-columns: 1fr 1fr; }
+
+/* budget category breakdown */
+.bud-click { cursor: pointer; border-radius: 6px; }
+.bud-click:hover { background: var(--surface-2); }
+.bud-caret { color: var(--ink-3); font-size: 11px; width: 12px; flex: 0 0 12px; }
+.bud-breakdown { margin: 10px 0 2px 22px; padding-left: 10px; border-left: 2px solid var(--hairline); }
+.bud-bd-head { font-size: 12px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); padding: 2px 6px 6px; }
+
+/* transactions filter toolbar */
+.fsel {
+  padding: 5px 10px; border-radius: 99px; border: 1px solid var(--hairline);
+  font-size: 13px; color: var(--ink-2); background: var(--surface); font-family: inherit;
+  max-width: 190px;
+}
+.fsearch {
+  padding: 5px 13px; border-radius: 99px; border: 1px solid var(--hairline);
+  font-size: 13px; color: var(--ink); background: var(--surface); font-family: inherit;
+  min-width: 200px; flex: 1;
+}
+.fsearch::placeholder { color: var(--ink-3); }
+.clear-chip { color: var(--crit); border-color: var(--crit); }
+.clear-chip:hover { background: var(--crit-wash); }
+.fsummary { font-size: 12.5px; color: var(--ink-3); margin: -4px 0 10px 4px; }
+.tx-edit { opacity: 0; color: var(--ink-3); font-size: 13px; padding: 4px 7px; border-radius: 6px; }
+.tx-row:hover .tx-edit { opacity: 1; }
+.tx-edit:hover { background: var(--accent-wash); color: var(--accent); }

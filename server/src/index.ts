@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerApi } from './api.js';
 import { dbFile } from './db.js';
+import { startMaintenance } from './maintenance.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const webDist = path.resolve(here, '../../web/dist');
@@ -30,6 +31,7 @@ if (fs.existsSync(webDist)) {
 
 await app.listen({ port, host: '127.0.0.1' });
 console.log(`Pondo → http://localhost:${port}   (db: ${dbFile})`);
+startMaintenance();
 
 // Pretty-hostname listener: with a hosts entry (127.0.0.1 pondo.test) this makes
 // plain http://pondo.test work by proxying port 80 to the main port.

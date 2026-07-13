@@ -9,14 +9,16 @@ const STATUS: Record<FlipItem['status'], { cls: string; label: string }> = {
   stock: { cls: 'due', label: 'in stock' },
   sold: { cls: 'paid', label: '✓ sold' },
   writeoff: { cls: 'overdue', label: 'written off' },
+  cost: { cls: 'auto', label: 'op. cost' },
 };
 
-export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
+export default function BuySell({ boot, rev, refresh, showToast }: ScreenProps) {
   const [data, setData] = useState<FlipsData | null>(null);
   const [buyOpen, setBuyOpen] = useState(false);
   const [selling, setSelling] = useState<FlipItem | null>(null);
 
   // buy form
+  const [itemKind, setItemKind] = useState<'item' | 'cost'>('item');
   const [name, setName] = useState('');
   const [qty, setQty] = useState('1');
   const [cost, setCost] = useState('');
@@ -27,33 +29,45 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
   const [soldPrice, setSoldPrice] = useState('');
   const [soldFees, setSoldFees] = useState('');
   const [soldDate, setSoldDate] = useState(todayStr());
+  const [buyAcct, setBuyAcct] = useState('');
+  const [soldAcct, setSoldAcct] = useState('');
 
   // sell form
   const [price, setPrice] = useState('');
   const [fees, setFees] = useState('');
   const [saleDate, setSaleDate] = useState(todayStr());
+  const [sellAcct, setSellAcct] = useState('');
 
   useEffect(() => { api.flips().then(setData); }, [rev]);
 
   const cents = (s: string) => Math.round(parseFloat(s || '0') * 100);
 
+  const isCost = itemKind === 'cost';
+
   const saveBuy = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !(cents(cost) >= 0)) return;
-    if (alreadySold && !(cents(soldPrice) > 0)) return;
+    if (!isCost && alreadySold && !(cents(soldPrice) > 0)) return;
     try {
       await api.addFlip({
+        kind: itemKind,
         name: name.trim(), qty: Math.max(1, Math.round(+qty || 1)), note: note.trim(),
-        buyDate, buyCostCents: cents(cost), otherCostCents: cents(otherCost),
-        ...(alreadySold ? {
+        buyDate, buyCostCents: cents(cost), otherCostCents: isCost ? 0 : cents(otherCost),
+        ...(buyAcct ? { accountId: +buyAcct } : {}),
+        ...(!isCost && alreadySold ? {
           salePriceCents: cents(soldPrice), saleFeesCents: cents(soldFees), saleDate: soldDate,
+          ...(soldAcct ? { saleAccountId: +soldAcct } : {}),
         } : {}),
       });
-      showToast(alreadySold
-        ? `Flip logged — ${name.trim()}, ${signedPeso(cents(soldPrice) - cents(soldFees) - cents(cost) - cents(otherCost))} profit`
-        : `Purchase logged — ${name.trim()}`);
+      const ledger = buyAcct ? ' · logged in Transactions' : '';
+      showToast(isCost
+        ? `Cost logged — ${name.trim()}, ${peso(cents(cost))}${ledger}`
+        : alreadySold
+          ? `Flip logged — ${name.trim()}, ${signedPeso(cents(soldPrice) - cents(soldFees) - cents(cost) - cents(otherCost))} profit${ledger}`
+          : `Purchase logged — ${name.trim()}${ledger}`);
       setBuyOpen(false); setName(''); setQty('1'); setCost(''); setOtherCost(''); setNote('');
-      setAlreadySold(false); setSoldPrice(''); setSoldFees('');
+      setAlreadySold(false); setSoldPrice(''); setSoldFees(''); setItemKind('item');
+      setBuyAcct(''); setSoldAcct('');
       refresh();
     } catch (err) { showToast(`Could not save: ${(err as Error).message}`); }
   };
@@ -64,11 +78,14 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
     const p = writeOff ? 0 : cents(price);
     if (!writeOff && !(p > 0)) return;
     try {
-      await api.sellFlip(selling.id, { salePriceCents: p, saleFeesCents: cents(fees), saleDate });
+      await api.sellFlip(selling.id, {
+        salePriceCents: p, saleFeesCents: cents(fees), saleDate,
+        ...(sellAcct ? { accountId: +sellAcct } : {}),
+      });
       showToast(writeOff
         ? `${selling.name} written off — ${peso(selling.costCents)} realized loss`
-        : `${selling.name} sold for ${peso(p)}`);
-      setSelling(null); setPrice(''); setFees('');
+        : `${selling.name} sold for ${peso(p)}${sellAcct ? ' · income logged in Transactions' : ''}`);
+      setSelling(null); setPrice(''); setFees(''); setSellAcct('');
       refresh();
     } catch (err) { showToast(`Could not save: ${(err as Error).message}`); }
   };
@@ -86,9 +103,19 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
     refresh();
   };
 
+  const acctSelect = (value: string, onChange: (v: string) => void, label: string) => (
+    <div className="frow">
+      <label className="fld-label">{label}</label>
+      <select className="inp" value={value} onChange={e => onChange(e.target.value)}>
+        <option value="">— not recorded in Transactions —</option>
+        {boot.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+      </select>
+    </div>
+  );
+
   if (!data) return null;
   const { summary: s, items, monthly } = data;
-  const soldItems = items.filter(i => i.status !== 'stock');
+  const soldItems = items.filter(i => i.status === 'sold' || i.status === 'writeoff');
   const avgDays = soldItems.length
     ? Math.round(soldItems.reduce((a, i) => a + i.daysHeld, 0) / soldItems.length) : null;
 
@@ -133,7 +160,10 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
           <div className="stat-value num" style={{ color: s.realizedCents >= 0 ? 'var(--good-text)' : 'var(--crit)' }}>
             {signedPeso(s.realizedCents)}
           </div>
-          <div className="stat-delta">{s.roiPct != null ? `${s.roiPct.toFixed(1)}% return on sold cost` : 'nothing sold yet'}</div>
+          <div className="stat-delta">
+            {s.roiPct != null ? `${s.roiPct.toFixed(1)}% ROI on flips` : 'nothing sold yet'}
+            {s.opCostCents > 0 ? ` · after ${peso(s.opCostCents)} op. costs` : ''}
+          </div>
         </div>
         <div className="card">
           <div className="stat-label">Avg time to sell</div>
@@ -151,13 +181,17 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
           </div>
           {items.map(i => (
             <div className="flip-row" key={i.id}>
-              <div className="tx-ico">{i.status === 'stock' ? '📦' : i.status === 'sold' ? '🏷️' : '🗑️'}</div>
+              <div className="tx-ico">{i.status === 'cost' ? '🧾' : i.status === 'stock' ? '📦' : i.status === 'sold' ? '🏷️' : '🗑️'}</div>
               <div className="tx-what">
                 <div className="tx-title">{i.name}{i.qty > 1 ? ` ×${i.qty}` : ''}</div>
                 <div className="tx-meta">
-                  bought {shortDate(i.buyDate)}
-                  {i.saleDate ? ` · ${i.status === 'writeoff' ? 'written off' : 'sold'} ${shortDate(i.saleDate)}` : ''}
-                  {` · ${i.daysHeld}d${i.saleDate ? '' : ' held'}`}
+                  {i.status === 'cost'
+                    ? `paid ${shortDate(i.buyDate)}`
+                    : <>bought {shortDate(i.buyDate)}
+                        {i.saleDate ? ` · ${i.status === 'writeoff' ? 'written off' : 'sold'} ${shortDate(i.saleDate)}` : ''}
+                        {` · ${i.daysHeld}d${i.saleDate ? '' : ' held'}`}</>}
+                  {i.buyAcctName ? ` · via ${i.buyAcctName}` : ''}
+                  {i.saleAcctName && i.saleAcctName !== i.buyAcctName ? ` → ${i.saleAcctName}` : ''}
                   {i.note ? ` · ${i.note}` : ''}
                 </div>
               </div>
@@ -166,15 +200,18 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
               <div className="ra num">
                 {i.profitCents != null
                   ? <span className={i.profitCents >= 0 ? 'up' : 'down'}>{signedPeso(i.profitCents)}
-                      <div className="tx-meta">{i.costCents > 0 ? `${((i.profitCents / i.costCents) * 100).toFixed(0)}% ROI` : ''}</div>
+                      <div className="tx-meta">{i.status !== 'cost' && i.costCents > 0 ? `${((i.profitCents / i.costCents) * 100).toFixed(0)}% ROI` : ''}</div>
                     </span>
                   : <span className="tx-meta">—</span>}
               </div>
               <div><span className={`pill ${STATUS[i.status].cls}`}>{STATUS[i.status].label}</span></div>
               <div className="flip-actions">
-                {i.status === 'stock'
-                  ? <button className="mark-btn" onClick={() => { setSelling(i); setSaleDate(todayStr()); }}>Sell</button>
-                  : <button className="mark-btn" title="Undo — back to stock" onClick={() => unsell(i)}>↩</button>}
+                {i.status === 'stock' && (
+                  <button className="mark-btn" onClick={() => { setSelling(i); setSaleDate(todayStr()); setSellAcct(''); }}>Sell</button>
+                )}
+                {(i.status === 'sold' || i.status === 'writeoff') && (
+                  <button className="mark-btn" title="Undo — back to stock" onClick={() => unsell(i)}>↩</button>
+                )}
                 <button className="tx-del" title={`Delete ${i.name}`} onClick={() => del(i)}>✕</button>
               </div>
             </div>
@@ -208,40 +245,53 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
       {buyOpen && (
         <div className="overlay open" onClick={e => { if (e.target === e.currentTarget) setBuyOpen(false); }}>
           <form className="modal" onSubmit={saveBuy}>
-            <h2>Add item</h2>
+            <h2>{isCost ? 'Add operational cost' : 'Add item'}</h2>
+            <div className="type-seg two">
+              <button type="button" className={!isCost ? 'on' : ''} onClick={() => setItemKind('item')}>Item to resell</button>
+              <button type="button" className={isCost ? 'on' : ''} onClick={() => setItemKind('cost')}>Operational cost</button>
+            </div>
             <div className="frow">
-              <label className="fld-label">Item</label>
-              <input className="inp" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Wilson Ultra v5" autoFocus />
+              <label className="fld-label">{isCost ? 'What was it for?' : 'Item'}</label>
+              <input className="inp" value={name} onChange={e => setName(e.target.value)}
+                placeholder={isCost ? 'e.g. customs tax, packaging, gas' : 'e.g. Wilson Ultra v5'} autoFocus />
             </div>
             <div className="frow2">
               <div style={{ flex: 2 }}>
-                <label className="fld-label">Total cost (₱)</label>
+                <label className="fld-label">{isCost ? 'Amount (₱)' : 'Total cost (₱)'}</label>
                 <input className="inp" value={cost} onChange={e => setCost(e.target.value)} inputMode="decimal" placeholder="0.00" />
               </div>
-              <div style={{ flex: 2 }}>
-                <label className="fld-label">Other costs (₱)</label>
-                <input className="inp" value={otherCost} onChange={e => setOtherCost(e.target.value)} inputMode="decimal" placeholder="fees, shipping, customs" />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label className="fld-label">Qty</label>
-                <input className="inp" value={qty} onChange={e => setQty(e.target.value)} inputMode="numeric" />
-              </div>
+              {!isCost && (
+                <div style={{ flex: 2 }}>
+                  <label className="fld-label">Other costs (₱)</label>
+                  <input className="inp" value={otherCost} onChange={e => setOtherCost(e.target.value)} inputMode="decimal" placeholder="fees, shipping, customs" />
+                </div>
+              )}
+              {!isCost && (
+                <div style={{ flex: 1 }}>
+                  <label className="fld-label">Qty</label>
+                  <input className="inp" value={qty} onChange={e => setQty(e.target.value)} inputMode="numeric" />
+                </div>
+              )}
             </div>
             <div className="frow2">
               <div style={{ flex: 1 }}>
-                <label className="fld-label">Bought on</label>
+                <label className="fld-label">{isCost ? 'Paid on' : 'Bought on'}</label>
                 <input className="inp" type="date" value={buyDate} max={todayStr()} onChange={e => setBuyDate(e.target.value)} />
               </div>
               <div style={{ flex: 2 }}>
                 <label className="fld-label">Note (optional)</label>
-                <input className="inp" value={note} onChange={e => setNote(e.target.value)} placeholder="supplier, condition…" />
+                <input className="inp" value={note} onChange={e => setNote(e.target.value)}
+                  placeholder={isCost ? 'which shipment / platform…' : 'supplier, condition…'} />
               </div>
             </div>
-            <label className="check">
-              <input type="checkbox" checked={alreadySold} onChange={e => setAlreadySold(e.target.checked)} />
-              Already sold — record the sale too
-            </label>
-            {alreadySold && (
+            {acctSelect(buyAcct, setBuyAcct, 'Paid from')}
+            {!isCost && (
+              <label className="check">
+                <input type="checkbox" checked={alreadySold} onChange={e => setAlreadySold(e.target.checked)} />
+                Already sold — record the sale too
+              </label>
+            )}
+            {!isCost && alreadySold && (
               <div className="frow2">
                 <div style={{ flex: 2 }}>
                   <label className="fld-label">Sale price (₱)</label>
@@ -257,7 +307,8 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
                 </div>
               </div>
             )}
-            {alreadySold && parseFloat(soldPrice) > 0 && (
+            {!isCost && alreadySold && acctSelect(soldAcct, setSoldAcct, 'Sale deposited to')}
+            {!isCost && alreadySold && parseFloat(soldPrice) > 0 && (
               <div className="tx-meta" style={{ marginBottom: 12 }}>
                 Profit: <b className={cents(soldPrice) - cents(soldFees) - cents(cost) - cents(otherCost) >= 0 ? 'up' : 'down'}>
                   {signedPeso(cents(soldPrice) - cents(soldFees) - cents(cost) - cents(otherCost))}
@@ -267,8 +318,8 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
             <div className="modal-foot">
               <button type="button" className="ghost-btn" onClick={() => setBuyOpen(false)}>Cancel</button>
               <button type="submit" className="save-btn"
-                disabled={!name.trim() || !(parseFloat(cost) >= 0) || (alreadySold && !(parseFloat(soldPrice) > 0))}>
-                {alreadySold ? 'Add sold item' : 'Add purchase'}
+                disabled={!name.trim() || !(parseFloat(cost) >= 0) || (!isCost && alreadySold && !(parseFloat(soldPrice) > 0))}>
+                {isCost ? 'Add cost' : alreadySold ? 'Add sold item' : 'Add purchase'}
               </button>
             </div>
           </form>
@@ -296,6 +347,7 @@ export default function BuySell({ rev, refresh, showToast }: ScreenProps) {
                 <input className="inp" type="date" value={saleDate} max={todayStr()} onChange={e => setSaleDate(e.target.value)} />
               </div>
             </div>
+            {acctSelect(sellAcct, setSellAcct, 'Deposit to')}
             {parseFloat(price) > 0 && (
               <div className="tx-meta" style={{ marginBottom: 12 }}>
                 Profit: <b className={cents(price) - cents(fees) - selling.costCents >= 0 ? 'up' : 'down'}>
