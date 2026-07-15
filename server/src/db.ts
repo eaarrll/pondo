@@ -18,7 +18,7 @@ sqlite.exec(`
 CREATE TABLE IF NOT EXISTS accounts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('cash','bank','ewallet','credit','investment')),
+  type TEXT NOT NULL CHECK (type IN ('cash','bank','ewallet','credit','investment','external')),
   subtitle TEXT NOT NULL DEFAULT '',
   opening_cents INTEGER NOT NULL DEFAULT 0,
   archived INTEGER NOT NULL DEFAULT 0,
@@ -92,6 +92,34 @@ if (!flipCols.some(c => c.name === 'kind')) {
 if (!flipCols.some(c => c.name === 'buy_tx_id')) {
   sqlite.exec('ALTER TABLE flips ADD COLUMN buy_tx_id INTEGER REFERENCES transactions(id)');
   sqlite.exec('ALTER TABLE flips ADD COLUMN sale_tx_id INTEGER REFERENCES transactions(id)');
+}
+
+// SQLite can't alter a CHECK constraint — rebuild accounts to allow type 'external'
+// (favorites: accounts you don't own, usable as transfer counterparties).
+const acctDdl = (sqlite.prepare(
+  "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
+).get() as { sql: string }).sql;
+if (!acctDdl.includes("'external'")) {
+  sqlite.pragma('foreign_keys = OFF');
+  sqlite.exec(`
+    BEGIN;
+    CREATE TABLE accounts_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('cash','bank','ewallet','credit','investment','external')),
+      subtitle TEXT NOT NULL DEFAULT '',
+      opening_cents INTEGER NOT NULL DEFAULT 0,
+      archived INTEGER NOT NULL DEFAULT 0,
+      sort INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO accounts_new (id, name, type, subtitle, opening_cents, archived, sort)
+      SELECT id, name, type, subtitle, opening_cents, archived, sort FROM accounts;
+    DROP TABLE accounts;
+    ALTER TABLE accounts_new RENAME TO accounts;
+    COMMIT;
+  `);
+  sqlite.pragma('foreign_keys = ON');
+  console.log("migration: accounts now accepts type 'external'");
 }
 
 export const db = drizzle(sqlite, { schema });

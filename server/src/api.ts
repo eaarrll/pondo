@@ -6,15 +6,26 @@ import { periodInfo, type Period } from './summary.js';
 import { addDays, addMonths, MON, monthEnd, parse, today } from './dates.js';
 
 const FREQ_MONTHS: Record<string, number> = { monthly: 1, quarterly: 3, annual: 12 };
-const ACCOUNT_TYPES = ['cash', 'bank', 'ewallet', 'credit', 'investment'];
+const ACCOUNT_TYPES = ['cash', 'bank', 'ewallet', 'credit', 'investment', 'external'];
 
+// Money in/out for a period. Transfers between owned accounts are neutral;
+// transfers to an external (favorite) account are money out, from one money in.
 function sums(start: string, end: string): { inCents: number; outCents: number } {
-  const rows = sqlite.prepare(
-    `SELECT type, COALESCE(SUM(amount_cents), 0) s FROM transactions
-     WHERE occurred_on BETWEEN ? AND ? AND type IN ('expense','income') GROUP BY type`,
-  ).all(start, end) as { type: string; s: number }[];
-  const get = (t: string) => rows.find(r => r.type === t)?.s ?? 0;
-  return { inCents: get('income'), outCents: get('expense') };
+  return sqlite.prepare(
+    `SELECT
+       COALESCE(SUM(CASE
+         WHEN t.type = 'income' AND fa.type != 'external' THEN t.amount_cents
+         WHEN t.type = 'transfer' AND fa.type = 'external' AND COALESCE(ta.type, '') != 'external' THEN t.amount_cents
+         ELSE 0 END), 0) inCents,
+       COALESCE(SUM(CASE
+         WHEN t.type = 'expense' AND fa.type != 'external' THEN t.amount_cents
+         WHEN t.type = 'transfer' AND COALESCE(ta.type, '') = 'external' AND fa.type != 'external' THEN t.amount_cents
+         ELSE 0 END), 0) outCents
+     FROM transactions t
+     JOIN accounts fa ON fa.id = t.account_id
+     LEFT JOIN accounts ta ON ta.id = t.to_account_id
+     WHERE t.occurred_on BETWEEN ? AND ?`,
+  ).get(start, end) as { inCents: number; outCents: number };
 }
 
 function accountBalances() {
@@ -34,17 +45,24 @@ function accountBalances() {
     ORDER BY a.sort, a.id`).all();
 }
 
-// Net worth = openings + all income − all expenses up to a date.
-// Transfers move money between owned accounts, so they cancel out.
+// Net worth = owned openings + income − expenses ± transfers crossing the
+// owned/external boundary. Owned↔owned transfers cancel out; favorites
+// (external accounts) are other people's money and never count.
 function netWorthAt(date: string): number {
   const opening = (sqlite.prepare(
-    'SELECT COALESCE(SUM(opening_cents), 0) s FROM accounts WHERE archived = 0',
+    "SELECT COALESCE(SUM(opening_cents), 0) s FROM accounts WHERE archived = 0 AND type != 'external'",
   ).get() as { s: number }).s;
   const flows = (sqlite.prepare(
-    `SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount_cents
-                              WHEN type = 'expense' THEN -amount_cents
-                              ELSE 0 END), 0) s
-     FROM transactions WHERE occurred_on <= ?`,
+    `SELECT COALESCE(SUM(CASE
+        WHEN t.type = 'income' AND fa.type != 'external' THEN t.amount_cents
+        WHEN t.type = 'expense' AND fa.type != 'external' THEN -t.amount_cents
+        WHEN t.type = 'transfer' AND COALESCE(ta.type, '') = 'external' AND fa.type != 'external' THEN -t.amount_cents
+        WHEN t.type = 'transfer' AND fa.type = 'external' AND COALESCE(ta.type, '') != 'external' THEN t.amount_cents
+        ELSE 0 END), 0) s
+     FROM transactions t
+     JOIN accounts fa ON fa.id = t.account_id
+     LEFT JOIN accounts ta ON ta.id = t.to_account_id
+     WHERE t.occurred_on <= ?`,
   ).get(date) as { s: number }).s;
   return opening + flows;
 }
@@ -495,7 +513,7 @@ export function registerApi(app: FastifyInstance): void {
     }).returning().get();
 
   const accountExists = (id: number) =>
-    !!sqlite.prepare('SELECT id FROM accounts WHERE id = ? AND archived = 0').get(id);
+    !!sqlite.prepare("SELECT id FROM accounts WHERE id = ? AND archived = 0 AND type != 'external'").get(id);
 
   app.post('/api/flips', (req, reply) => {
     const b = req.body as {

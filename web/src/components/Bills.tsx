@@ -133,7 +133,7 @@ export default function Bills({ boot, rev, refresh, showToast }: ScreenProps) {
                 <label className="fld-label">Pay from</label>
                 <select className="inp" value={acctId} onChange={e => setAcctId(e.target.value)}>
                   <option value="">— choose account —</option>
-                  {boot.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  {boot.accounts.filter(a => a.type !== 'external').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </div>
               <div style={{ flex: 1 }}>

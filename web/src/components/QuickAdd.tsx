@@ -32,6 +32,8 @@ export default function QuickAdd({ accounts, categories, onClose, onSaved, edit 
   }, [onClose]);
 
   const cats = categories.filter(c => c.kind === (type === 'income' ? 'income' : 'expense'));
+  // favorites (not your accounts) can only be transfer counterparties
+  const pickAccounts = type === 'transfer' ? accounts : accounts.filter(a => a.type !== 'external');
   const amountCents = Math.round(parseFloat(amount || '0') * 100);
   const valid = amountCents > 0 && fromId != null
     && (type === 'transfer' ? toId != null && toId !== fromId : catId != null);
@@ -93,7 +95,7 @@ export default function QuickAdd({ accounts, categories, onClose, onSaved, edit 
         <div>
           <p className="fld-label">{type === 'transfer' ? 'From account' : type === 'income' ? 'Into account' : 'Account'}</p>
           <div className="chips">
-            {accounts.map(a => chip(fromId === a.id, a.name, () => {
+            {pickAccounts.map(a => chip(fromId === a.id, a.type === 'external' ? `⭐ ${a.name}` : a.name, () => {
               setFromId(a.id);
               if (toId === a.id) setToId(null);
             }, a.id))}
@@ -104,7 +106,8 @@ export default function QuickAdd({ accounts, categories, onClose, onSaved, edit 
           <div>
             <p className="fld-label">To account</p>
             <div className="chips">
-              {accounts.filter(a => a.id !== fromId).map(a => chip(toId === a.id, a.name, () => setToId(a.id), a.id))}
+              {pickAccounts.filter(a => a.id !== fromId)
+                .map(a => chip(toId === a.id, a.type === 'external' ? `⭐ ${a.name}` : a.name, () => setToId(a.id), a.id))}
             </div>
           </div>
         )}

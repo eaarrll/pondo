@@ -108,7 +108,7 @@ export default function BuySell({ boot, rev, refresh, showToast }: ScreenProps) 
       <label className="fld-label">{label}</label>
       <select className="inp" value={value} onChange={e => onChange(e.target.value)}>
         <option value="">— not recorded in Transactions —</option>
-        {boot.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        {boot.accounts.filter(a => a.type !== 'external').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
       </select>
     </div>
   );

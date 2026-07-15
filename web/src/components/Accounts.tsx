@@ -7,13 +7,15 @@ const GROUPS: [string, string[]][] = [
   ['E-Wallets', ['ewallet']],
   ['Credit Cards', ['credit']],
   ['Investments', ['investment']],
+  ['Favorites · not mine', ['external']],
 ];
 const TYPE_OPTIONS = [
   ['bank', 'Bank'], ['ewallet', 'E-wallet'], ['cash', 'Cash'],
   ['credit', 'Credit card'], ['investment', 'Investment'],
+  ['external', "Favorite — someone else's account"],
 ] as const;
 const TYPE_ICON: Record<string, string> = {
-  cash: '💵', bank: '🏦', ewallet: '📱', credit: '💳', investment: '📈',
+  cash: '💵', bank: '🏦', ewallet: '📱', credit: '💳', investment: '📈', external: '⭐',
 };
 
 export default function Accounts({ boot, rev, refresh, showToast, viewAccountTx }: ScreenProps) {
@@ -32,7 +34,7 @@ export default function Accounts({ boot, rev, refresh, showToast, viewAccountTx 
     try {
       await api.addAccount({
         name: name.trim(), type, subtitle,
-        openingCents: Math.round(parseFloat(opening || '0') * 100),
+        openingCents: type === 'external' ? 0 : Math.round(parseFloat(opening || '0') * 100),
       });
       showToast(`Account "${name.trim()}" added`);
       setFormOpen(false); setName(''); setSubtitle(''); setOpening('');
@@ -107,10 +109,14 @@ export default function Accounts({ boot, rev, refresh, showToast, viewAccountTx 
         {GROUPS.map(([label, types]) => {
           const rows = boot.accounts.filter(a => types.includes(a.type));
           if (rows.length === 0) return null;
+          const isExt = types.includes('external');
           const sub = rows.reduce((s, a) => s + a.balanceCents, 0);
           return (
             <div className="acct-group" key={label}>
-              <h3>{label} · <span className="num">{(sub < 0 ? '−' : '') + peso(sub)}</span></h3>
+              <h3>
+                {isExt ? '⭐ ' : ''}{label} · <span className="num">{(sub < 0 ? '−' : '') + peso(sub)}</span>
+                {isExt ? <span className="ext-note"> net sent · never counted in your net worth</span> : null}
+              </h3>
               {rows.map(a => (
                 <div className="acct-row clickable" key={a.id} role="button" tabIndex={0}
                   title="View this account's transactions"
@@ -152,11 +158,19 @@ export default function Accounts({ boot, rev, refresh, showToast, viewAccountTx 
               <label className="fld-label">Notes (optional)</label>
               <input className="inp" value={subtitle} onChange={e => setSubtitle(e.target.value)} placeholder="e.g. payroll account" />
             </div>
-            <div className="frow">
-              <label className="fld-label">Current balance (₱)</label>
-              <input className="inp" value={opening} onChange={e => setOpening(e.target.value)} inputMode="decimal"
-                placeholder={type === 'credit' ? 'what you owe, as negative — e.g. -12500' : '0.00'} />
-            </div>
+            {type !== 'external' ? (
+              <div className="frow">
+                <label className="fld-label">Current balance (₱)</label>
+                <input className="inp" value={opening} onChange={e => setOpening(e.target.value)} inputMode="decimal"
+                  placeholder={type === 'credit' ? 'what you owe, as negative — e.g. -12500' : '0.00'} />
+              </div>
+            ) : (
+              <div className="empty-note" style={{ padding: '2px 2px 12px' }}>
+                Someone else's account (family GCash, a supplier, a frequent payee). Send money to it
+                with a transfer — that counts as money out and reduces your net worth; its own balance
+                just tracks how much you've sent net.
+              </div>
+            )}
             <div className="modal-foot">
               <button type="button" className="ghost-btn" onClick={() => setFormOpen(false)}>Cancel</button>
               <button type="submit" className="save-btn" disabled={!name.trim()}>Add account</button>

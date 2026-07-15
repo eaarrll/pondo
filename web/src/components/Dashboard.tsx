@@ -7,8 +7,11 @@ import type { ScreenProps } from '../App';
 const PERIODS: Period[] = ['day', 'week', 'month', 'year'];
 const PERIOD_NOTE: Record<Period, string> = { day: 'today', week: 'this week', month: 'this month', year: 'year to date' };
 const monOf = (s: string) => shortDate(s).split(' ')[0];
+const TYPE_ICON: Record<string, string> = {
+  cash: '💵', bank: '🏦', ewallet: '📱', credit: '💳', investment: '📈', external: '⭐',
+};
 
-export default function Dashboard({ rev, openAdd, onNav }: ScreenProps) {
+export default function Dashboard({ boot, rev, openAdd, onNav, viewAccountTx }: ScreenProps) {
   const [period, setPeriod] = useState<Period>('month');
   const [sum, setSum] = useState<Summary | null>(null);
   const [recent, setRecent] = useState<Tx[]>([]);
@@ -113,9 +116,30 @@ export default function Dashboard({ rev, openAdd, onNav }: ScreenProps) {
 
       <div className="grid g2 mt">
         <div className="card">
-          <div className="h2row"><h2>Recent transactions</h2><button className="theme-btn" onClick={() => onNav('tx')}>View all →</button></div>
-          {recent.map(t => <TxRow key={t.id} tx={t} />)}
-          {recent.length === 0 && <div className="empty-note">Nothing yet — press <span className="kbd">N</span> to log your first transaction.</div>}
+          <div className="h2row"><h2>Account balances</h2><button className="theme-btn" onClick={() => onNav('accts')}>Manage →</button></div>
+          {boot.accounts.filter(a => a.type !== 'external').map(a => (
+            <button key={a.id} className="dash-acct" title={`View ${a.name} transactions`}
+              onClick={() => viewAccountTx(a)}>
+              <span className="dash-acct-ico">{TYPE_ICON[a.type]}</span>
+              <span className="dash-acct-name">{a.name}</span>
+              <span className={`num dash-acct-bal ${a.balanceCents < 0 ? 'down' : 'up'}`}>
+                {(a.balanceCents < 0 ? '−' : '+') + peso(a.balanceCents)}
+              </span>
+            </button>
+          ))}
+          {boot.accounts.filter(a => a.type !== 'external').length === 0 && (
+            <div className="empty-note">No accounts yet — set them up first.</div>
+          )}
+          <div className="dash-nw">
+            <span>Net worth</span>
+            <span className="num">
+              {(() => {
+                const nw = boot.accounts.filter(a => a.type !== 'external')
+                  .reduce((s, a) => s + a.balanceCents, 0);
+                return (nw < 0 ? '−' : '') + peso(nw);
+              })()}
+            </span>
+          </div>
         </div>
         <div className="card">
           <div className="h2row"><h2>Coming up</h2><button className="theme-btn" onClick={() => onNav('bills')}>All bills →</button></div>
@@ -131,6 +155,12 @@ export default function Dashboard({ rev, openAdd, onNav }: ScreenProps) {
           ))}
           {upcoming.length === 0 && <div className="empty-note">Nothing due in the next two weeks.</div>}
         </div>
+      </div>
+
+      <div className="card mt">
+        <div className="h2row"><h2>Recent transactions</h2><button className="theme-btn" onClick={() => onNav('tx')}>View all →</button></div>
+        {recent.map(t => <TxRow key={t.id} tx={t} />)}
+        {recent.length === 0 && <div className="empty-note">Nothing yet — press <span className="kbd">N</span> to log your first transaction.</div>}
       </div>
     </section>
   );
