@@ -6,18 +6,19 @@ const TITLES: Record<TxType, string> = {
   expense: 'Add expense', income: 'Add income', transfer: 'Record transfer',
 };
 
-export default function QuickAdd({ accounts, categories, onClose, onSaved, edit }: {
+export default function QuickAdd({ accounts, categories, onClose, onSaved, edit, preset }: {
   accounts: Account[];
   categories: Category[];
   onClose: () => void;
   onSaved: (msg: string) => void;
   edit?: Tx | null;
+  preset?: { type?: TxType; fromId?: number; toId?: number } | null;
 }) {
-  const [type, setType] = useState<TxType>(edit?.type ?? 'expense');
+  const [type, setType] = useState<TxType>(edit?.type ?? preset?.type ?? 'expense');
   const [amount, setAmount] = useState(edit ? String(edit.amountCents / 100) : '');
   const [catId, setCatId] = useState<number | null>(edit?.categoryId ?? null);
-  const [fromId, setFromId] = useState<number | null>(edit?.accountId ?? null);
-  const [toId, setToId] = useState<number | null>(edit?.toAccountId ?? null);
+  const [fromId, setFromId] = useState<number | null>(edit?.accountId ?? preset?.fromId ?? null);
+  const [toId, setToId] = useState<number | null>(edit?.toAccountId ?? preset?.toId ?? null);
   const [note, setNote] = useState(edit?.note ?? '');
   const [date, setDate] = useState(edit?.occurredOn ?? todayStr());
   const [saving, setSaving] = useState(false);
@@ -109,6 +110,13 @@ export default function QuickAdd({ accounts, categories, onClose, onSaved, edit 
               {pickAccounts.filter(a => a.id !== fromId)
                 .map(a => chip(toId === a.id, a.type === 'external' ? `⭐ ${a.name}` : a.name, () => setToId(a.id), a.id))}
             </div>
+          </div>
+        )}
+
+        {type === 'expense' && accounts.find(a => a.id === fromId)?.type === 'credit' && (
+          <div className="hint-note">
+            💳 This logs <b>spending on the card</b> — its debt grows. Paying the card off?
+            Switch to <b>Transfer</b> with the card as the destination instead.
           </div>
         )}
 

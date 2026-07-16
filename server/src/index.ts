@@ -17,13 +17,25 @@ const app = Fastify({ logger: false });
 registerApi(app);
 
 if (fs.existsSync(webDist)) {
-  await app.register(fastifyStatic, { root: webDist });
+  await app.register(fastifyStatic, {
+    root: webDist,
+    cacheControl: false, // we set Cache-Control ourselves below
+    // hashed assets may cache forever; index.html must revalidate every load
+    // so new builds show up on a normal refresh
+    setHeaders(res, filePath) {
+      if (/assets\//.test(filePath)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
+  });
   // SPA fallback: anything that isn't /api/* gets index.html
   app.setNotFoundHandler((req, reply) => {
     if (req.url.startsWith('/api/')) {
       return reply.code(404).send({ error: 'not found' });
     }
-    return reply.sendFile('index.html');
+    return reply.header('Cache-Control', 'no-cache').sendFile('index.html');
   });
 } else {
   console.log('web/dist not found — API only (run `npm run build` for the UI, or use `npm run dev`)');

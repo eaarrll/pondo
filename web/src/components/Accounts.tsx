@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, peso, type Account, type NetWorth } from '../api';
+import QuickAdd from './QuickAdd';
 import type { ScreenProps } from '../App';
 
 const GROUPS: [string, string[]][] = [
@@ -25,8 +26,27 @@ export default function Accounts({ boot, rev, refresh, showToast, viewAccountTx 
   const [type, setType] = useState<string>('bank');
   const [subtitle, setSubtitle] = useState('');
   const [opening, setOpening] = useState('');
+  const [reconciling, setReconciling] = useState<Account | null>(null);
+  const [actualBal, setActualBal] = useState('');
+  const [payCard, setPayCard] = useState<Account | null>(null);
 
   useEffect(() => { api.networth().then(setNw); }, [rev]);
+
+  const reconcile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reconciling) return;
+    const target = Math.round(parseFloat(actualBal.replace(/,/g, '') || '0') * 100);
+    try {
+      const res = await api.reconcileAccount(reconciling.id, target);
+      showToast(res.deltaCents === 0
+        ? `${reconciling.name} already matches — no change`
+        : `${reconciling.name} reconciled (adjusted by ${res.deltaCents > 0 ? '+' : '−'}${peso(res.deltaCents)})`);
+      setReconciling(null); setActualBal('');
+      refresh();
+    } catch (err) {
+      showToast(`Could not reconcile: ${(err as Error).message}`);
+    }
+  };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -131,6 +151,14 @@ export default function Accounts({ boot, rev, refresh, showToast, viewAccountTx 
                     {(a.balanceCents < 0 ? '−' : '') + peso(a.balanceCents)}
                   </div>
                   <span className="acct-go">›</span>
+                  {a.type === 'credit' && (
+                    <button className="mark-btn" title={`Record a payment to ${a.name}`}
+                      onClick={e => { e.stopPropagation(); setPayCard(a); }}>Pay</button>
+                  )}
+                  {a.type !== 'external' && (
+                    <button className="acct-adj" title={`Reconcile ${a.name} to its real balance`}
+                      onClick={e => { e.stopPropagation(); setReconciling(a); setActualBal(''); }}>⚖</button>
+                  )}
                   <button className="acct-del" title={`Delete ${a.name}`}
                     onClick={e => { e.stopPropagation(); del(a); }}>✕</button>
                 </div>
@@ -177,6 +205,40 @@ export default function Accounts({ boot, rev, refresh, showToast, viewAccountTx 
             </div>
           </form>
         </div>
+      )}
+
+      {reconciling && (
+        <div className="overlay open" onClick={e => { if (e.target === e.currentTarget) setReconciling(null); }}>
+          <form className="modal" onSubmit={reconcile}>
+            <h2>Reconcile — {reconciling.name}</h2>
+            <div className="tx-meta" style={{ marginBottom: 14 }}>
+              Pondo currently computes{' '}
+              <b className="num">{(reconciling.balanceCents < 0 ? '−' : '') + peso(reconciling.balanceCents)}</b>.
+              Enter the real balance from your bank/app and the opening balance is adjusted —
+              your transaction history stays untouched.
+            </div>
+            <div className="frow">
+              <label className="fld-label">Actual balance right now (₱)</label>
+              <input className="inp" value={actualBal} onChange={e => setActualBal(e.target.value)}
+                inputMode="decimal" autoFocus
+                placeholder={reconciling.type === 'credit' ? 'what you owe, as negative — e.g. -70888.75' : '0.00'} />
+            </div>
+            <div className="modal-foot">
+              <button type="button" className="ghost-btn" onClick={() => setReconciling(null)}>Cancel</button>
+              <button type="submit" className="save-btn" disabled={actualBal.trim() === ''}>Reconcile</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {payCard && (
+        <QuickAdd
+          accounts={boot.accounts}
+          categories={boot.categories}
+          preset={{ type: 'transfer', toId: payCard.id }}
+          onClose={() => setPayCard(null)}
+          onSaved={(msg) => { setPayCard(null); showToast(msg); refresh(); }}
+        />
       )}
     </section>
   );

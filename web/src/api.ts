@@ -145,6 +145,8 @@ export const api = {
     post<Account>('/api/accounts', body),
   delAccount: (id: number) =>
     j<{ ok: boolean; deletedTx: number }>(`/api/accounts/${id}`, { method: 'DELETE' }),
+  reconcileAccount: (id: number, targetBalanceCents: number) =>
+    post<{ ok: boolean; deltaCents: number }>(`/api/accounts/${id}/reconcile`, { targetBalanceCents }),
   budgets: () => j<BudgetRow[]>('/api/budgets'),
   setBudget: (categoryId: number, capCents: number) =>
     post<{ ok: boolean }>('/api/budgets', { categoryId, capCents }, 'PUT'),

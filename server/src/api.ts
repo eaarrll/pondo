@@ -262,6 +262,23 @@ export function registerApi(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  // Reconcile: user states the account's TRUE current balance; we adjust the
+  // opening balance by the difference. History stays intact, no fake transactions.
+  app.post('/api/accounts/:id/reconcile', (req, reply) => {
+    const id = +(req.params as { id: string }).id;
+    const b = req.body as { targetBalanceCents: number };
+    if (!Number.isInteger(b.targetBalanceCents)) {
+      return reply.code(400).send({ error: 'targetBalanceCents must be an integer' });
+    }
+    const acct = (accountBalances() as { id: number; balanceCents: number }[]).find(a => a.id === id);
+    if (!acct) return reply.code(404).send({ error: 'account not found' });
+    const deltaCents = b.targetBalanceCents - acct.balanceCents;
+    if (deltaCents !== 0) {
+      sqlite.prepare('UPDATE accounts SET opening_cents = opening_cents + ? WHERE id = ?').run(deltaCents, id);
+    }
+    return { ok: true, deltaCents };
+  });
+
   // Deleting an account cascades: its transactions (both sides of transfers) go
   // with it, linked bill payments are unlinked, and bills fall back to "no account".
   app.delete('/api/accounts/:id', (req, reply) => {

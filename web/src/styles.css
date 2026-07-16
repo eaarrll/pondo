@@ -391,3 +391,12 @@ h1 { font-size: 21px; margin: 0; letter-spacing: -0.015em; }
 }
 .dash-nw .num { font-size: 15px; color: var(--ink); letter-spacing: 0; }
 .ext-note { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--ink-3); margin-left: 6px; }
+
+/* reconcile + credit hints */
+.acct-adj { opacity: 0; color: var(--ink-3); font-size: 13px; padding: 4px 7px; border-radius: 6px; }
+.acct-row:hover .acct-adj { opacity: 1; }
+.acct-adj:hover { background: var(--accent-wash); color: var(--accent); }
+.hint-note {
+  font-size: 12.5px; color: var(--ink-2); background: var(--warn-wash);
+  border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 12px; margin-bottom: 14px;
+}
